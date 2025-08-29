@@ -8,7 +8,7 @@
 # SyncPlay 起動変数
 $SyncplayPath = "C:\Program Files (x86)\Syncplay\SyncplayConsole.exe"
 $SyncplayServerPath = "C:\Program Files (x86)\Syncplay\syncplayServer.exe"
-$VLCPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
+$PlayerPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
 $ServerIP = "192.168.100.13"
 $ServerPort = "8999"
 $UserName = "Server"
@@ -20,7 +20,7 @@ $VideoFilePath = "D:\Lemon\Documents\SyncPlay_AutoTimer\Video\Terminal.0_Video_2
 $TargetTimes = @("00:00", "00:00", "00:00")
 
 # Severモード
-$SeverMode = $true
+$ServerMode = $true
 
 #================================================================================
 # 関数定義
@@ -43,7 +43,7 @@ function Start-SyncplayAuto {
         "--host", "${ServerIP}:${ServerPort}",
         "--name", "`"${UserName}`"",
         "--room", "`"${RoomName}`"",
-        "--player-path", "`"${VLCPath}`"",
+        "--player-path", "`"${PlayerPath}`"",
         "--no-store"
     )
     
@@ -107,8 +107,8 @@ if (-not (Test-Path $SyncplayPath)) {
     exit
 }
 
-if (-not (Test-Path $VLCPath)) {
-    Write-Host "[ERROR] VLCが見つかりません。" -ForegroundColor Red
+if (-not (Test-Path $PlayerPath)) {
+    Write-Host "[ERROR] ビデオプレイヤーが見つかりません。" -ForegroundColor Red
     Read-Host "Enterキーを押して終了"
     exit
 }
@@ -127,7 +127,7 @@ Write-Host ""
 $LaunchedTimes = @()
 
 # SyncPlay Serverを起動
-if ($SeverMode){
+if ($ServerMode){
     $process = Start-Process -FilePath "${SyncplayServerPath}"
     Start-Sleep -Seconds 5
         
