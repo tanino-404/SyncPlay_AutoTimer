@@ -34,10 +34,10 @@ $DebugMode = $false             # デバッグ機能
 $MinimizeStartMode = $true      # コンソール画面を最小化する機能
 
 # 自動停止機能
-$AutoStopMinutes = 1            # 動画再生から停止するまでの時間
+$AutoStopMinutes = 1            # 動画再生から停止するまでの時間(秒)
 
 # 自動再生設定
-$AutoPlayDelay = 5              # 動画再生ソフトの起動から自動再生までのディレイ
+$AutoPlayDelay = 3              # 動画再生ソフトの起動から自動再生までのディレイ(秒)
 
 #================================================================================
 # 関数定義
@@ -158,8 +158,8 @@ function Start-SyncplayServer {
     try {
         # サーバーを最小化ウィンドウで起動
         $process = Start-Process -FilePath "${SyncplayServerPath}" -WindowStyle Minimized -PassThru
-        # 2秒待機
-        Start-Sleep -Seconds 2
+        # 1秒待機
+        Start-Sleep -Milliseconds 1000
         
         if ($process.HasExited) {
             Log-Message "Syncplay Serverが起動に失敗しました。" "ERROR"
@@ -192,8 +192,8 @@ function Start-Syncplay {
     Get-Process -Name "SyncplayConsole", "Syncplay" -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-Process -Name "vlc" -ErrorAction SilentlyContinue | Stop-Process -Force
 
-    # 2秒待機
-    Start-Sleep -Seconds 2
+    # 0.5秒待機
+    Start-Sleep -Milliseconds 500
 
     # 起動コマンドを定義
     $arguments = @(
@@ -219,17 +219,17 @@ function Start-Syncplay {
         Log-Message "引数: $($arguments -join ' ')" "DEBUG"
     }
 
-    # Clientの場合のみ3秒ディレイ
+    # Clientの場合のみ1.5秒ディレイ
     if (!$ServerMode)
     {
-        Start-Sleep -Seconds 3
+        Start-Sleep -Milliseconds 1500
     }
     
     # SyncPlayを起動
     try {
         $process = Start-Process -FilePath "${SyncplayPath}" -ArgumentList "${arguments}" -PassThru
         # 2秒待機
-        Start-Sleep -Seconds 2
+        Start-Sleep -Milliseconds 1000
         
         if ($process.HasExited) {
             Log-Message "Syncplayが起動に失敗しました。" "ERROR"
@@ -242,7 +242,7 @@ function Start-Syncplay {
             
             # VLCが起動するまで待機
             if(!$ServerMode){ 
-                $AutoPlayDelay = $AutoPlayDelay - 3 
+                $AutoPlayDelay = $AutoPlayDelay - 1.5 
             }
             Log-Message "VLCの起動を待機中... (${AutoPlayDelay}秒)" "INFO"
             Start-Sleep -Seconds $AutoPlayDelay
@@ -351,7 +351,7 @@ function Check-AutoStop {
             }
         }
         
-        if ($allTargetsLaunched) {
+        <#if ($allTargetsLaunched) {
             Log-Message "すべてのスケジュールが完了しました。サーバーを停止します..." "INFO"
             Stop-Syncplay -StopServer:$true
             
@@ -360,7 +360,7 @@ function Check-AutoStop {
             Log-Message "すべての処理が完了しました。スクリプトを終了します。" "SUCCESS"
             Start-Sleep -Seconds 3
             exit
-        }
+        }#>
     }
 }
 
