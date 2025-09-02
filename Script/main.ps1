@@ -241,7 +241,9 @@ function Start-Syncplay {
             Log-Message "Syncplayが正常に起動しました (PID: $($process.Id))" "SUCCESS"
             
             # VLCが起動するまで待機
-            if(!$ServerMode) { $AutoPlayDelay -= 3 }
+            if(!$ServerMode){ 
+                $AutoPlayDelay = $AutoPlayDelay - 3 
+            }
             Log-Message "VLCの起動を待機中... (${AutoPlayDelay}秒)" "INFO"
             Start-Sleep -Seconds $AutoPlayDelay
             
