@@ -25,30 +25,37 @@ $RoomPassword = ""  # オプション
 $VideoFilePath = "..\Video\Terminal.0_Video_250722_v2.mp4"
 
 # 起動時刻のリスト(24時間表記)
-$TargetTimes = @("14:16", "00:00", "00:00", "00:00")
+$TargetTimes = @("00:00", "00:00", "00:00", "00:00")
 
-# 動作モード切り替え
+# 動作モード設定
 $ServerMode = $true             # サーバ起動機能
 $AutoStopMode = $true           # 自動停止機能
-$DebugMode = $false              # デバッグ機能
+$DebugMode = $false             # デバッグ機能
+$MinimizeStartMode = $true      # コンソール画面を最小化する機能
 
 # 自動停止機能
-$AutoStopMinutes = 1           # 起動から何分後に停止するか
-$StopServerOnExit = $true       # 最後の停止時にサーバーも停止するか
+$AutoStopMinutes = 1            # 動画再生から停止するまでの時間
+
+# 自動再生設定
+$AutoPlayDelay = 5              # 動画再生ソフトの起動から自動再生までのディレイ
 
 #================================================================================
 # 関数定義
 #================================================================================
 
-function Write-ColoredLog {
+
+# ログ出力
+function Log-Message {
     param(
         [string]$Message,
         [string]$Level = "INFO",
         [System.ConsoleColor]$Color = "White"
     )
-    
+
+    # 時刻書式を設定
     $timestamp = Get-Date -Format "HH:mm:ss"
-    
+
+    # 文字色を設定
     switch ($Level) {
         "INFO"    { $Color = "Green" }
         "WARNING" { $Color = "Yellow" }
@@ -56,58 +63,139 @@ function Write-ColoredLog {
         "DEBUG"   { $Color = "Cyan" }
         "SUCCESS" { $Color = "Magenta" }
     }
-    
+
+    #出力
     Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $Color
 }
 
-function Stop-SyncplayProcesses {
-    param(
-        [bool]$StopServer = $false
-    )
-    
-    Write-ColoredLog "プロセスを停止しています..." "INFO"
-    
-    # SyncplayConsoleを停止
-    $syncplayProcesses = Get-Process -Name "SyncplayConsole", "Syncplay" -ErrorAction SilentlyContinue
-    if ($syncplayProcesses) {
-        $syncplayProcesses | Stop-Process -Force
-        Write-ColoredLog "Syncplayを停止しました" "SUCCESS"
+
+# ウィンドウ最小化
+function Minimize-Window {
+    $sig = @'
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+'@
+    try {
+        Add-Type -MemberDefinition $sig -Name NativeMethods -Namespace Win32 -ErrorAction SilentlyContinue
+        $hwnd = [Win32.NativeMethods]::GetConsoleWindow()
+        # 6 = SW_MINIMIZE
+        [Win32.NativeMethods]::ShowWindow($hwnd, 6) | Out-Null
+        Log-Message "コンソールウィンドウを最小化しました" "INFO"
     }
-    
-    # VLCを停止
-    $vlcProcess = Get-Process -Name "vlc" -ErrorAction SilentlyContinue
-    if ($vlcProcess) {
-        $vlcProcess | Stop-Process -Force
-        Write-ColoredLog "VLCを停止しました" "SUCCESS"
-    }
-    
-    # サーバーを停止（オプション）
-    if ($StopServer) {
-        $serverProcess = Get-Process -Name "syncplayServer" -ErrorAction SilentlyContinue
-        if ($serverProcess) {
-            $serverProcess | Stop-Process -Force
-            Write-ColoredLog "Syncplay Serverを停止しました" "SUCCESS"
-        }
+    catch {
+        Log-Message "ウィンドウの最小化に失敗しました: $_" "WARNING"
     }
 }
 
-function Start-SyncplayAuto {
+
+# ウィンドウ復元
+function Restore-Window {
+    try {
+        Add-Type -MemberDefinition @'
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr GetConsoleWindow();
+'@ -Name NativeMethods -Namespace Win32 -ErrorAction SilentlyContinue
+        $hwnd = [Win32.NativeMethods]::GetConsoleWindow()
+        # 9 = SW_RESTORE
+        [Win32.NativeMethods]::ShowWindow($hwnd, 9) | Out-Null
+    }
+    catch {}
+}
+
+
+# VLCに再生コマンドを送信
+function VLC-Send-Play {
+    Log-Message "VLCに再生コマンドを送信しています..." "INFO"
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+
+        # VLCウィンドウをアクティブにする
+        $vlcProcess = Get-Process -Name "vlc" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if ($vlcProcess) {
+            # VLCウィンドウにフォーカス
+            Add-Type @"
+            using System;
+            using System.Runtime.InteropServices;
+            public class Win32 {
+                [DllImport("user32.dll")]
+                public static extern bool SetForegroundWindow(IntPtr hWnd);
+                [DllImport("user32.dll")]
+                public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+            }
+"@
+            [Win32]::SetForegroundWindow($vlcProcess.MainWindowHandle)
+
+            # 500ms待機
+            Start-Sleep -Milliseconds 500
+
+            # スペースキーを送信（再生/一時停止）
+            [System.Windows.Forms.SendKeys]::SendWait(" ")
+            Log-Message "再生コマンドを送信しました" "SUCCESS"
+        }
+    }
+    catch {
+        Log-Message "再生コマンドの送信に失敗しました: $_" "WARNING"
+    }
+}
+
+
+# Syncplayサーバーを起動
+function Start-SyncplayServer {
+    Log-Message "Syncplay Serverを起動しています..." "INFO"
+    
+    # 既存のサーバープロセスを確認
+    $existingServer = Get-Process -Name "syncplayServer" -ErrorAction SilentlyContinue
+    if ($existingServer) {
+        Log-Message "Syncplay Serverは既に起動しています (PID: $($existingServer.Id))" "WARNING"
+        return $true
+    }
+    
+    try {
+        # サーバーを最小化ウィンドウで起動
+        $process = Start-Process -FilePath "${SyncplayServerPath}" -WindowStyle Minimized -PassThru
+        # 2秒待機
+        Start-Sleep -Seconds 2
+        
+        if ($process.HasExited) {
+            Log-Message "Syncplay Serverが起動に失敗しました。" "ERROR"
+            return $false
+        } else {
+            Log-Message "Syncplay Serverが正常に起動しました (PID: $($process.Id))" "SUCCESS"
+            return $true
+        }
+    }
+    catch {
+        Log-Message "サーバー起動中にエラーが発生しました: $_" "ERROR"
+        return $false
+    }
+}
+
+
+# Syncplay, VLCの自動起動
+function Start-Syncplay {
     param(
         [string]$ScheduleKey
     )
-    
+
     Write-Host ""
     Write-Host "======================================================" -ForegroundColor Cyan
-    Write-ColoredLog "Syncplayを起動します..." "INFO" "Cyan"
+    Log-Message "Syncplayを起動します..." "INFO" "Cyan"
     Write-Host "======================================================" -ForegroundColor Cyan
-    
+
     # 既存のプロセスを終了（サーバーは除く）
-    Write-ColoredLog "既存のクライアントプロセスを終了しています..." "WARNING"
+    Log-Message "既存のクライアントプロセスを終了しています..." "WARNING"
     Get-Process -Name "SyncplayConsole", "Syncplay" -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-Process -Name "vlc" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    # 2秒待機
     Start-Sleep -Seconds 2
-    
-    # 引数を構築
+
+    # 起動コマンドを定義
     $arguments = @(
         "--host", "${ServerIP}:${ServerPort}",
         "--name", "`"${UserName}`"",
@@ -116,6 +204,7 @@ function Start-SyncplayAuto {
         "--no-store"
     )
     
+    # ルームパスワードを定義
     if ($RoomPassword) {
         $arguments += "--password"
         $arguments += $RoomPassword
@@ -124,25 +213,40 @@ function Start-SyncplayAuto {
     # 動画ファイルを最後に追加
     $arguments += "`"${VideoFilePath}`""
     
+    # ===デバッグ用出力===
     if ($DebugMode) {
-        Write-ColoredLog "コマンド: $SyncplayPath" "DEBUG"
-        Write-ColoredLog "引数: $($arguments -join ' ')" "DEBUG"
+        Log-Message "コマンド: $SyncplayPath" "DEBUG"
+        Log-Message "引数: $($arguments -join ' ')" "DEBUG"
+    }
+
+    # Clientの場合のみ3秒ディレイ
+    if (!$ServerMode)
+    {
+        Start-Sleep -Seconds 3
     }
     
     # SyncPlayを起動
     try {
         $process = Start-Process -FilePath "${SyncplayPath}" -ArgumentList "${arguments}" -PassThru
-        Start-Sleep -Seconds 3
+        # 2秒待機
+        Start-Sleep -Seconds 2
         
         if ($process.HasExited) {
-            Write-ColoredLog "Syncplayが起動に失敗しました。" "ERROR"
-            
+            Log-Message "Syncplayが起動に失敗しました。" "ERROR"
             # 代替方法: COM オブジェクトを使用
-            Write-ColoredLog "代替方法で再試行します..." "WARNING"
+            Log-Message "代替方法で再試行します..." "WARNING"
             $shell = New-Object -ComObject Shell.Application
             $shell.ShellExecute($SyncplayPath, ($arguments -join ' '))
         } else {
-            Write-ColoredLog "Syncplayが正常に起動しました (PID: $($process.Id))" "SUCCESS"
+            Log-Message "Syncplayが正常に起動しました (PID: $($process.Id))" "SUCCESS"
+            
+            # VLCが起動するまで待機
+            if(!$ServerMode) { $AutoPlayDelay -= 3 }
+            Log-Message "VLCの起動を待機中... (${AutoPlayDelay}秒)" "INFO"
+            Start-Sleep -Seconds $AutoPlayDelay
+            
+            # 自動再生コマンドをVLCに送信
+            VLC-Send-Play
             
             # 自動停止が有効な場合、停止時刻を記録
             if ($AutoStopMode) {
@@ -152,47 +256,55 @@ function Start-SyncplayAuto {
                     StopTime = $stopTime
                     Stopped = $false
                 }
-                
-                Write-ColoredLog "自動停止予定時刻: $($stopTime.ToString('HH:mm:ss'))" "INFO"
+                Log-Message "自動停止予定時刻: $($stopTime.ToString('HH:mm:ss'))" "INFO"
             }
-            
-            # VLCが起動するまで待機
-            Start-Sleep -Seconds 3
         }
     }
     catch {
-        Write-ColoredLog "起動中にエラーが発生しました: $_" "ERROR"
+        Log-Message "起動中にエラーが発生しました: $_" "ERROR"
     }
 }
 
-function Start-SyncplayServer {
-    Write-ColoredLog "Syncplay Serverを起動しています..." "INFO"
+
+# Syncplay,VLCの自動停止
+function Stop-Syncplay {
+    param(
+        [bool]$StopServer = $false
+    )
     
-    # 既存のサーバープロセスを確認
-    $existingServer = Get-Process -Name "syncplayServer" -ErrorAction SilentlyContinue
-    if ($existingServer) {
-        Write-ColoredLog "Syncplay Serverは既に起動しています (PID: $($existingServer.Id))" "WARNING"
-        return $true
+    Log-Message "プロセスを停止しています..." "INFO"
+
+    # 停止時にウィンドウを最小化
+    if ($MinimizeStartMode) {
+        Minimize-Window
     }
     
-    try {
-        $process = Start-Process -FilePath "${SyncplayServerPath}" -PassThru
-        Start-Sleep -Seconds 5
-        
-        if ($process.HasExited) {
-            Write-ColoredLog "Syncplay Serverが起動に失敗しました。" "ERROR"
-            return $false
-        } else {
-            Write-ColoredLog "Syncplay Serverが正常に起動しました (PID: $($process.Id))" "SUCCESS"
-            return $true
+    # SyncplayConsoleを停止
+    $syncplayProcesses = Get-Process -Name "SyncplayConsole", "Syncplay" -ErrorAction SilentlyContinue
+    if ($syncplayProcesses) {
+        $syncplayProcesses | Stop-Process -Force
+        Log-Message "Syncplayを停止しました" "SUCCESS"
+    }
+    
+    # VLCを停止
+    $vlcProcess = Get-Process -Name "vlc" -ErrorAction SilentlyContinue
+    if ($vlcProcess) {
+        $vlcProcess | Stop-Process -Force
+        Log-Message "VLCを停止しました" "SUCCESS"
+    }
+    
+    # サーバーを停止（オプション）
+    if ($StopServer) {
+        $serverProcess = Get-Process -Name "syncplayServer" -ErrorAction SilentlyContinue
+        if ($serverProcess) {
+            $serverProcess | Stop-Process -Force
+            Log-Message "Syncplay Serverを停止しました" "SUCCESS"
         }
     }
-    catch {
-        Write-ColoredLog "サーバー起動中にエラーが発生しました: $_" "ERROR"
-        return $false
-    }
 }
 
+
+# 自動停止されているかチェック
 function Check-AutoStop {
     if (-not $AutoStopMode) {
         return
@@ -207,17 +319,17 @@ function Check-AutoStop {
         if (-not $schedule.Stopped -and $currentTime -ge $schedule.StopTime) {
             Write-Host ""
             Write-Host "======================================================" -ForegroundColor Cyan
-            Write-ColoredLog "自動停止時刻になりました [$key]" "INFO"
+            Log-Message "自動停止時刻になりました [$key]" "INFO"
             Write-Host "======================================================" -ForegroundColor Cyan
             
-            # プロセスを停止
-            Stop-SyncplayProcesses -StopServer:$StopServerOnExit
+            # プロセスを停止（ウィンドウ最小化含む）
+            Stop-Syncplay -StopServer:$false
             
             # 停止済みフラグを設定
             $schedule.Stopped = $true
             
             $duration = [Math]::Round(($currentTime - $schedule.LaunchTime).TotalMinutes, 1)
-            Write-ColoredLog "実行時間: $duration 分" "INFO"
+            Log-Message "実行時間: $duration 分" "INFO"
             Write-Host "======================================================" -ForegroundColor Cyan
             Write-Host ""
         }
@@ -228,28 +340,30 @@ function Check-AutoStop {
     }
     
     # すべてのスケジュールが停止済みで、サーバー停止が有効な場合
-    if ($StopServerOnExit -and $allStopped -and $script:LaunchSchedule.Count -gt 0) {
+    if ($ServerMode -and $AutoStopMode -and $allStopped -and $script:LaunchSchedule.Count -gt 0) {
         $allTargetsLaunched = $true
         foreach ($targetTime in $TargetTimes) {
-            if ($targetTime -notin $script:LaunchSchedule.Keys) {
+            if ($targetTime -ne "00:00" -and $targetTime -notin $script:LaunchSchedule.Keys) {
                 $allTargetsLaunched = $false
                 break
             }
         }
         
         if ($allTargetsLaunched) {
-            Write-ColoredLog "すべてのスケジュールが完了しました。サーバーを停止します..." "INFO"
-            Stop-SyncplayProcesses -StopServer:$true
+            Log-Message "すべてのスケジュールが完了しました。サーバーを停止します..." "INFO"
+            Stop-Syncplay -StopServer:$true
             
             # スクリプトを終了
             Write-Host ""
-            Write-ColoredLog "すべての処理が完了しました。スクリプトを終了します。" "SUCCESS"
+            Log-Message "すべての処理が完了しました。スクリプトを終了します。" "SUCCESS"
             Start-Sleep -Seconds 3
             exit
         }
     }
 }
 
+
+# ステータス表示
 function Show-Status {
     if ($script:LaunchSchedule.Count -eq 0) {
         return
@@ -276,10 +390,12 @@ function Show-Status {
     }
 }
 
+
 #================================================================================
 # メイン処理
 #================================================================================
 
+# スタート表示
 Clear-Host
 
 Write-Host ""
@@ -294,6 +410,7 @@ Write-Host "  ユーザー名        : $UserName"
 Write-Host "  動画ファイルパス  : $(Split-Path -Leaf $VideoFilePath)"
 Write-Host ""
 
+# モード表示
 if($ServerMode){
     Write-Host "  サーバ-自動起動モード      : 有効" -ForegroundColor Cyan
 } else{
@@ -301,9 +418,13 @@ if($ServerMode){
 }
 if ($AutoStopMode) {
     Write-Host "  動画再生-自動停止モード    : 有効(${AutoStopMinutes}分後)" -ForegroundColor Cyan
-    Write-Host "  サーバー-自動停止モード    : $(if($StopServerOnExit){'有効'}else{'無効'})" -ForegroundColor Cyan
 } else {
     Write-Host "  動画再生-自動停止モード    : 無効" -ForegroundColor Gray
+}
+if ($MinimizeStartMode){
+    Write-Host "  画面最小化モード           : 有効" -ForegroundColor Cyan
+} else{
+    Write-Host "  画面最小化モード           : 無効" -ForegroundColor Cyan
 }
 if($DebugMode){
     Write-Host "  デバッグモード             : 有効" -ForegroundColor Cyan
@@ -316,36 +437,43 @@ Write-Host ""
 
 # ファイル存在チェック
 if (-not (Test-Path $SyncplayPath)) {
-    Write-ColoredLog "Syncplay.exeが見つかりません。" "ERROR"
+    Log-Message "Syncplay.exeが見つかりません。" "ERROR"
     Read-Host "Enterキーを押して終了"
     exit
 }
-
 if (-not (Test-Path $PlayerPath)) {
-    Write-ColoredLog "ビデオプレイヤーが見つかりません。" "ERROR"
+    Log-Message "ビデオプレイヤーが見つかりません。" "ERROR"
+    Read-Host "Enterキーを押して終了"
+    exit
+}
+if (-not (Test-Path $VideoFilePath)) {
+    Log-Message "動画ファイルが見つかりません。" "ERROR"
     Read-Host "Enterキーを押して終了"
     exit
 }
 
-if (-not (Test-Path $VideoFilePath)) {
-    Write-ColoredLog "動画ファイルが見つかりません。" "ERROR"
-    Read-Host "Enterキーを押して終了"
-    exit
+# ウィンドウを最小化
+if ($MinimizeStartMode) {
+    Minimize-Window
 }
 
 # SyncPlay Serverを起動
 if ($ServerMode) {
     if (Start-SyncplayServer) {
         Write-Host ""
-        Write-ColoredLog "指定時刻になるまで待機します..." "INFO"
+        Log-Message "指定時刻になるまで待機します..." "INFO"
         Write-Host "(Ctrl+C で中止できます)" -ForegroundColor Gray
     } else {
-        Write-ColoredLog "サーバーの起動に失敗しました。続行しますか？ (Y/N)" "WARNING"
+        Log-Message "サーバーの起動に失敗しました。続行しますか？ (Y/N)" "WARNING"
         $continue = Read-Host
         if ($continue -ne "Y" -and $continue -ne "y") {
             exit
         }
     }
+} else {
+    Write-Host ""
+    Log-Message "指定時刻になるまで待機します..." "INFO"
+    Write-Host "(Ctrl+C で中止できます)" -ForegroundColor Gray
 }
 
 # メインループ
@@ -358,16 +486,16 @@ while ($true) {
             $targetTime = Get-Date -Format "HH:mm"
         }
         
-        if ($currentTime -eq $targetTime -and $targetTime -notin $script:LaunchSchedule.Keys) {
+        if ($targetTime -ne "00:00" -and $currentTime -eq $targetTime -and $targetTime -notin $script:LaunchSchedule.Keys) {
             Write-Host ""
-            Write-ColoredLog "$currentTime になりました。" "INFO"
+            Log-Message "$currentTime になりました。" "INFO"
             
             # Syncplayを起動
-            Start-SyncplayAuto -ScheduleKey $targetTime
+            Start-Syncplay -ScheduleKey $targetTime
             
             Write-Host ""
-            Write-ColoredLog "起動処理が完了しました。" "SUCCESS"
-            Write-ColoredLog "起動済み時刻: $($script:LaunchSchedule.Keys -join ', ')" "INFO"
+            Log-Message "起動処理が完了しました。" "SUCCESS"
+            Log-Message "起動済み時刻: $($script:LaunchSchedule.Keys -join ', ')" "INFO"
             Write-Host "======================================================" -ForegroundColor Cyan
             Write-Host ""
         }
