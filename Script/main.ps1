@@ -22,10 +22,10 @@ $ServerPort = "8999"
 $UserName = "Server"
 $RoomName = "Test_Run"
 $RoomPassword = ""  # オプション
-$VideoFilePath = "..\Video\Terminal.0_Video_250722_v2.mp4"
+$VideoFilePath = "..\Video\Terminal0_JP_Video_R_250915_v1.mp4"
 
 # 起動時刻のリスト(24時間表記)
-$TargetTimes = @("00:00", "00:00", "00:00", "00:00")
+$TargetTimes = @("13:20", "00:00", "00:00", "00:00")
 
 # 動作モード設定
 $ServerMode = $true             # サーバ起動機能
@@ -228,7 +228,7 @@ function Start-Syncplay {
     # SyncPlayを起動
     try {
         $process = Start-Process -FilePath "${SyncplayPath}" -ArgumentList "${arguments}" -PassThru
-        # 2秒待機
+        # 1秒待機
         Start-Sleep -Milliseconds 1000
         
         if ($process.HasExited) {
