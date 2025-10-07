@@ -2,12 +2,31 @@
 # 実行方法: PowerShell -ExecutionPolicy Bypass -File "main.ps1"
 # Author: University of Osaka i-CHiLD (Tanino with Claude 4.1 Opus)
 
+
+#================================================================================
+# モジュールインポート (v2.0)
+#================================================================================
+
+# スクリプトのディレクトリを取得
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# VLC制御モジュールをインポート
+. "$ScriptDir\vlc-controller.ps1"
+
+# HTTPサーバーモジュールをインポート
+. "$ScriptDir\http-server.ps1"
+
+
 #================================================================================
 # グローバル変数
 #================================================================================
 
 # 起動管理用ハッシュテーブル（起動時刻と停止予定時刻を管理）
 $script:LaunchSchedule = @{}
+
+# VLC状態管理用グローバル変数
+$script:VLCState = "stopped"  # "stopped", "playing", "paused"
+
 
 #================================================================================
 # 設定項目
@@ -24,6 +43,11 @@ $RoomName = "Test_Run"
 $RoomPassword = ""  # オプション
 $VideoFilePath = "..\Video\Terminal0_JP_Video_R_250915_v1.mp4"
 
+# クライアントPC設定
+$ClientIPList = @(                  # クライアントPCのIPリスト
+    "192.168.100.54"
+)
+
 # 起動時刻のリスト(24時間表記)
 $TargetTimes = @("13:20", "00:00", "00:00", "00:00")
 
@@ -31,13 +55,25 @@ $TargetTimes = @("13:20", "00:00", "00:00", "00:00")
 $ServerMode = $true             # サーバ起動機能
 $AutoStopMode = $true           # 自動停止機能
 $DebugMode = $false             # デバッグ機能
+$KeyboardInputMode = $true      # キーボード入力でテスト（Phase1:キーボード入力テスト用）
 $MinimizeStartMode = $true      # コンソール画面を最小化する機能
 
-# 自動停止機能
+# 自動停止設定
 $AutoStopMinutes = 1            # 動画再生から停止するまでの時間(秒)
 
 # 自動再生設定
 $AutoPlayDelay = 3              # 動画再生ソフトの起動から自動再生までのディレイ(秒)
+
+# HTTPサーバー設定（サーバーモードが有効の場合のみMESHコマンド受付）
+$HttpServerPort = 8080              # HTTPリスニングポート
+$HttpServerTimeout = 30000          # サーバータイムアウト(ms)
+
+# ボタン操作設定
+$CommandTimeout = 500               # MESHコマンドのクライアントに対する配信タイムアウト(ms)
+$CommandRetry = 2                   # MESHコマンドの送信失敗時のリトライ回数
+$LongPressThreshold = 2000          # ボタンの長押し判定時間(ms)
+$DoubleClickThreshold = 500         # ボタンの連続押し判定時間(ms)
+
 
 #================================================================================
 # 関数定義
@@ -107,41 +143,7 @@ function Restore-Window {
 }
 
 
-# VLCに再生コマンドを送信
-function VLC-Send-Play {
-    Log-Message "VLCに再生コマンドを送信しています..." "INFO"
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-
-        # VLCウィンドウをアクティブにする
-        $vlcProcess = Get-Process -Name "vlc" -ErrorAction SilentlyContinue | Select-Object -First 1
-
-        if ($vlcProcess) {
-            # VLCウィンドウにフォーカス
-            Add-Type @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class Win32 {
-                [DllImport("user32.dll")]
-                public static extern bool SetForegroundWindow(IntPtr hWnd);
-                [DllImport("user32.dll")]
-                public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-            }
-"@
-            [Win32]::SetForegroundWindow($vlcProcess.MainWindowHandle)
-
-            # 500ms待機
-            Start-Sleep -Milliseconds 500
-
-            # スペースキーを送信（再生/一時停止）
-            [System.Windows.Forms.SendKeys]::SendWait(" ")
-            Log-Message "再生コマンドを送信しました" "SUCCESS"
-        }
-    }
-    catch {
-        Log-Message "再生コマンドの送信に失敗しました: $_" "WARNING"
-    }
-}
+# (VLC-Send-Play関数はvlc-controller.ps1モジュールに移動)
 
 
 # Syncplayサーバーを起動
@@ -370,11 +372,11 @@ function Show-Status {
     if ($script:LaunchSchedule.Count -eq 0) {
         return
     }
-    
+
     $currentTime = Get-Date
     Write-Host "`r" -NoNewline
     Write-Host "現在時刻: $($currentTime.ToString('HH:mm:ss')) | " -NoNewline -ForegroundColor Gray
-    
+
     $activeCount = 0
     foreach ($key in $script:LaunchSchedule.Keys) {
         $schedule = $script:LaunchSchedule[$key]
@@ -386,9 +388,120 @@ function Show-Status {
             }
         }
     }
-    
+
     if ($activeCount -eq 0) {
         Write-Host "待機中..." -NoNewline -ForegroundColor Gray
+    }
+}
+
+
+#================================================================================
+# MESH/HTTPサーバー関連関数 (v2.0)
+#================================================================================
+
+# HTTPサーバーコールバック: Toggle (再生/停止)
+function OnToggle-Callback {
+    Write-Host ""
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Log-Message "Toggle コマンドを受信しました" "INFO"
+    Write-Host "======================================================" -ForegroundColor Yellow
+
+    # ローカルVLCを制御
+    VLC-Send-Play
+
+    # クライアントPCに配信（ServerModeの場合のみ）
+    if ($ServerMode -and $ClientIPList.Count -gt 0) {
+        Log-Message "クライアントPCにコマンドを配信中..." "INFO"
+        $result = Send-CommandToClients -Command "toggle" -ClientIPs $ClientIPList -Port $HttpServerPort -TimeoutMs $CommandTimeout -Retry $CommandRetry
+        Log-Message "配信結果: 成功 $($result.Success)/$($result.Total), 失敗 $($result.Failed)" "INFO"
+    }
+
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+
+# HTTPサーバーコールバック: Quit (終了)
+function OnQuit-Callback {
+    Write-Host ""
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Log-Message "Quit コマンドを受信しました" "INFO"
+    Write-Host "======================================================" -ForegroundColor Yellow
+
+    # ローカルVLC/Syncplayを終了
+    VLC-Send-Quit
+    Stop-Syncplay -StopServer:$false
+
+    # クライアントPCに配信（ServerModeの場合のみ）
+    if ($ServerMode -and $ClientIPList.Count -gt 0) {
+        Log-Message "クライアントPCにコマンドを配信中..." "INFO"
+        $result = Send-CommandToClients -Command "quit" -ClientIPs $ClientIPList -Port $HttpServerPort -TimeoutMs $CommandTimeout -Retry $CommandRetry
+        Log-Message "配信結果: 成功 $($result.Success)/$($result.Total), 失敗 $($result.Failed)" "INFO"
+    }
+
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+
+# HTTPサーバーコールバック: Restart (再起動)
+function OnRestart-Callback {
+    Write-Host ""
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Log-Message "Restart コマンドを受信しました" "INFO"
+    Write-Host "======================================================" -ForegroundColor Yellow
+
+    # 全システム再起動
+    Stop-Syncplay -StopServer:$ServerMode
+
+    # クライアントPCに配信（ServerModeの場合のみ）
+    if ($ServerMode -and $ClientIPList.Count -gt 0) {
+        Log-Message "クライアントPCにコマンドを配信中..." "INFO"
+        $result = Send-CommandToClients -Command "restart" -ClientIPs $ClientIPList -Port $HttpServerPort -TimeoutMs $CommandTimeout -Retry $CommandRetry
+        Log-Message "配信結果: 成功 $($result.Success)/$($result.Total), 失敗 $($result.Failed)" "INFO"
+    }
+
+    # サーバー再起動
+    if ($ServerMode) {
+        Start-Sleep -Seconds 2
+        Start-SyncplayServer
+    }
+
+    Write-Host "======================================================" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+
+# HTTPサーバーコールバック: Status (状態取得)
+function OnStatus-Callback {
+    return (VLC-Get-Status)
+}
+
+
+# キーボード入力処理（Phase 1テスト用）
+function Handle-KeyboardInput {
+    param([System.ConsoleKey]$Key)
+
+    switch ($Key) {
+        "P" {
+            Log-Message "キーボード入力: P (Play/Pause)" "DEBUG"
+            OnToggle-Callback
+        }
+        "Q" {
+            Log-Message "キーボード入力: Q (Quit)" "DEBUG"
+            OnQuit-Callback
+        }
+        "R" {
+            Log-Message "キーボード入力: R (Restart)" "DEBUG"
+            OnRestart-Callback
+        }
+        "S" {
+            $status = OnStatus-Callback
+            Log-Message "キーボード入力: S (Status) → VLC状態: $status" "DEBUG"
+        }
+        default {
+            # 何もしない
+        }
     }
 }
 
@@ -434,6 +547,18 @@ if($DebugMode){
 else {
     Write-Host "  デバッグモード             : 無効" -ForegroundColor Gray
 }
+if($KeyboardInputMode){
+    Write-Host "  キーボード入力テストモード : 有効 (P/Q/R/S)" -ForegroundColor Yellow
+}
+else {
+    Write-Host "  キーボード入力テストモード : 無効" -ForegroundColor Gray
+}
+if($ServerMode){
+    Write-Host "  HTTPサーバー (MESH受付)    : 有効 (Port: $HttpServerPort)" -ForegroundColor Cyan
+}
+else {
+    Write-Host "  HTTPサーバー (コマンド受信): 有効 (Port: $HttpServerPort)" -ForegroundColor Cyan
+}
 
 Write-Host ""
 
@@ -459,12 +584,37 @@ if ($MinimizeStartMode) {
     Minimize-Window
 }
 
+# HTTPサーバーを起動 (v2.0)
+Write-Host ""
+Log-Message "HTTPサーバーを起動しています..." "INFO"
+$httpStarted = Start-HttpServer -Port $HttpServerPort `
+                                -OnToggle ${function:OnToggle-Callback} `
+                                -OnQuit ${function:OnQuit-Callback} `
+                                -OnRestart ${function:OnRestart-Callback} `
+                                -OnStatus ${function:OnStatus-Callback}
+
+if (-not $httpStarted) {
+    Log-Message "HTTPサーバーの起動に失敗しました。続行しますか？ (Y/N)" "WARNING"
+    $continue = Read-Host
+    if ($continue -ne "Y" -and $continue -ne "y") {
+        exit
+    }
+}
+
 # SyncPlay Serverを起動
 if ($ServerMode) {
     if (Start-SyncplayServer) {
         Write-Host ""
         Log-Message "指定時刻になるまで待機します..." "INFO"
         Write-Host "(Ctrl+C で中止できます)" -ForegroundColor Gray
+        if ($KeyboardInputMode) {
+            Write-Host ""
+            Write-Host "【キーボード入力テストモード】" -ForegroundColor Yellow
+            Write-Host "  P: 再生/停止トグル" -ForegroundColor Yellow
+            Write-Host "  Q: 終了" -ForegroundColor Yellow
+            Write-Host "  R: 再起動" -ForegroundColor Yellow
+            Write-Host "  S: 状態確認" -ForegroundColor Yellow
+        }
     } else {
         Log-Message "サーバーの起動に失敗しました。続行しますか？ (Y/N)" "WARNING"
         $continue = Read-Host
@@ -476,6 +626,14 @@ if ($ServerMode) {
     Write-Host ""
     Log-Message "指定時刻になるまで待機します..." "INFO"
     Write-Host "(Ctrl+C で中止できます)" -ForegroundColor Gray
+    if ($KeyboardInputMode) {
+        Write-Host ""
+        Write-Host "【キーボード入力テストモード】" -ForegroundColor Yellow
+        Write-Host "  P: 再生/停止トグル" -ForegroundColor Yellow
+        Write-Host "  Q: 終了" -ForegroundColor Yellow
+        Write-Host "  R: 再起動" -ForegroundColor Yellow
+        Write-Host "  S: 状態確認" -ForegroundColor Yellow
+    }
 }
 
 # メインループ
@@ -505,10 +663,16 @@ while ($true) {
     
     # 自動停止のチェック
     Check-AutoStop
-    
+
+    # キーボード入力チェック (v2.0)
+    if ($KeyboardInputMode -and [Console]::KeyAvailable) {
+        $key = [Console]::ReadKey($true)
+        Handle-KeyboardInput -Key $key.Key
+    }
+
     # ステータス表示（オプション）
     Show-Status
-    
+
     # 1秒待機
     Start-Sleep -Seconds 1
 }
