@@ -1,4 +1,4 @@
-# VLC Controller Module for SyncPlay AutoTimer v2.0
+﻿# VLC Controller Module for SyncPlay AutoTimer v2.0
 # Purpose: VLC media player control via SendKeys
 # Author: University of Osaka i-CHiLD (Tanino with Claude Sonnet 4.5)
 

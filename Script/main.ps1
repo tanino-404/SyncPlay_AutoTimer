@@ -1,4 +1,4 @@
-# SyncPlay自動起動・自動停止PowerShellスクリプト
+﻿# SyncPlay自動起動・自動停止PowerShellスクリプト
 # 実行方法: PowerShell -ExecutionPolicy Bypass -File "main.ps1"
 # Author: University of Osaka i-CHiLD (Tanino with Claude 4.1 Opus)
 

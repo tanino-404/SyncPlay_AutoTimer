@@ -1,4 +1,4 @@
-# HTTP Server Module for SyncPlay AutoTimer v2.0 (FIXED)
+﻿# HTTP Server Module for SyncPlay AutoTimer v2.0 (FIXED)
 # Purpose: MESH button command reception and distribution
 # Author: University of Osaka i-CHiLD (Tanino with Claude Sonnet 4.5)
 
