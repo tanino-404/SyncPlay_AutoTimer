@@ -66,7 +66,7 @@ $AutoPlayDelay = 3              # 動画再生ソフトの起動から自動再�
 
 # HTTPサーバー設定（サーバーモードが有効の場合のみMESHコマンド受付）
 $HttpServerPort = 8080              # HTTPリスニングポート
-$HttpServerTimeout = 30000          # サーバータイムアウト(ms)
+$HttpServerTimeout = 3000          # サーバータイムアウト(ms)
 
 # ボタン操作設定
 $CommandTimeout = 500               # MESHコマンドのクライアントに対する配信タイムアウト(ms)
@@ -463,8 +463,14 @@ function OnRestart-Callback {
 
     # サーバー再起動
     if ($ServerMode) {
+        Log-Message "2秒待機後、Syncplayサーバーを再起動します..." "INFO"
         Start-Sleep -Seconds 2
-        Start-SyncplayServer
+
+        if (Start-SyncplayServer) {
+            Log-Message "Syncplayサーバーの再起動に成功しました" "SUCCESS"
+        } else {
+            Log-Message "Syncplayサーバーの再起動に失敗しました" "ERROR"
+        }
     }
 
     Write-Host "======================================================" -ForegroundColor Yellow
@@ -663,6 +669,9 @@ while ($true) {
     
     # 自動停止のチェック
     Check-AutoStop
+
+    # HTTPリクエスト処理 (v2.0)
+    Process-HttpRequest
 
     # キーボード入力チェック (v2.0)
     if ($KeyboardInputMode -and [Console]::KeyAvailable) {
