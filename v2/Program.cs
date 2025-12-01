@@ -6,10 +6,12 @@ Console.WriteLine("  Keyboard Hook + HTTP Server + Syncplay + Config");
 Console.WriteLine("================================================\n");
 
 // 設定ファイル読み込み（Phase 3）
-var configManager = new ConfigManager("config.ini");
+// Windows Documents フォルダ内の固定パスを使用
+var configManager = new ConfigManager();
+Console.WriteLine($"[Program] Config path: {configManager.ConfigPath}\n");
 if (!configManager.LoadConfig())
 {
-    Console.WriteLine("[Program] Warning: Using hardcoded defaults.\n");
+    Console.WriteLine("[Program] ⚠️  Warning: Config loading failed. Using hardcoded defaults.\n");
 }
 
 // プロセスマネージャー初期化（ジョブオブジェクト）

@@ -5,29 +5,56 @@ namespace v2;
 
 /// <summary>
 /// config.ini ファイルの読み込みと管理
+/// Windows Documents フォルダ内の固定パスを使用
 /// </summary>
 public class ConfigManager
 {
     private readonly string _configPath;
+    private readonly string _configDirectory;
     private Dictionary<string, Dictionary<string, string>> _config = new();
 
-    public ConfigManager(string configPath = "config.ini")
+    public ConfigManager()
     {
-        _configPath = configPath;
+        // Windows Documents フォルダを取得
+        string documentsFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        _configDirectory = Path.Combine(documentsFolder, "SyncPlay_AutoTimer", "Setting");
+        _configPath = Path.Combine(_configDirectory, "config.ini");
     }
 
     /// <summary>
+    /// 設定ファイルパスを取得
+    /// </summary>
+    public string ConfigPath => _configPath;
+
+    /// <summary>
+    /// 設定ディレクトリを取得
+    /// </summary>
+    public string ConfigDirectory => _configDirectory;
+
+    /// <summary>
     /// config.ini ファイルを読み込む
+    /// ファイル/フォルダがない場合は自動作成
     /// </summary>
     public bool LoadConfig()
     {
         try
         {
+            // フォルダが存在しない場合は作成
+            if (!Directory.Exists(_configDirectory))
+            {
+                Console.WriteLine($"[ConfigManager] Config directory not found: {_configDirectory}");
+                Console.WriteLine($"[ConfigManager] Creating directory...");
+                Directory.CreateDirectory(_configDirectory);
+                Console.WriteLine($"[ConfigManager] ✅ Directory created: {_configDirectory}");
+            }
+
+            // ファイルが存在しない場合はテンプレートを作成
             if (!File.Exists(_configPath))
             {
                 Console.WriteLine($"[ConfigManager] Config file not found: {_configPath}");
-                Console.WriteLine($"[ConfigManager] Using hardcoded defaults instead.");
-                return false;
+                Console.WriteLine($"[ConfigManager] Creating template file...");
+                GenerateTemplate(_configPath);
+                Console.WriteLine($"[ConfigManager] ✅ Template created: {_configPath}");
             }
 
             _config.Clear();
@@ -39,6 +66,10 @@ public class ConfigManager
 
                 // コメント行スキップ
                 if (trimmedLine.StartsWith(";") || trimmedLine.StartsWith("#"))
+                    continue;
+
+                // 空行スキップ
+                if (string.IsNullOrWhiteSpace(trimmedLine))
                     continue;
 
                 // セクション行処理
@@ -65,13 +96,13 @@ public class ConfigManager
                 }
             }
 
-            Console.WriteLine($"[ConfigManager] Config loaded: {_configPath}");
+            Console.WriteLine($"[ConfigManager] ✅ Config loaded: {_configPath}");
             PrintLoadedConfig();
             return true;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ConfigManager] Error loading config: {ex.Message}");
+            Console.Error.WriteLine($"[ConfigManager] ❌ Error loading config: {ex.Message}");
             return false;
         }
     }
