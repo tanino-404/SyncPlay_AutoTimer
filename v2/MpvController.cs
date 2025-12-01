@@ -9,7 +9,7 @@ namespace v2;
 /// </summary>
 public class MpvController : IDisposable
 {
-    private const string MpvExePath = @"C:\Program Files\mpv\mpv.exe";
+    private const string DefaultMpvExePath = @"C:\Program Files\mpv\mpv.exe";
 
     private class MpvInstance
     {
@@ -21,10 +21,21 @@ public class MpvController : IDisposable
 
     private Dictionary<int, MpvInstance> _instances = new();
     private readonly ProcessManager _processManager;
+    private string _mpvExePath;
 
-    public MpvController(ProcessManager processManager)
+    public MpvController(ProcessManager processManager, ConfigManager? configManager = null)
     {
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
+
+        // ConfigManager から設定を読み込む、なければデフォルト値を使用
+        if (configManager != null)
+        {
+            _mpvExePath = configManager.GetValue("Syncplay", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
+        }
+        else
+        {
+            _mpvExePath = DefaultMpvExePath;
+        }
     }
 
     /// <summary>
@@ -40,9 +51,9 @@ public class MpvController : IDisposable
 
         try
         {
-            if (!File.Exists(MpvExePath))
+            if (!File.Exists(_mpvExePath))
             {
-                throw new FileNotFoundException($"MPV executable not found: {MpvExePath}");
+                throw new FileNotFoundException($"MPV executable not found: {_mpvExePath}");
             }
 
             if (!File.Exists(videoPath))
@@ -63,7 +74,7 @@ public class MpvController : IDisposable
             string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} \"{videoPath}\"";
 
             var process = _processManager.StartManagedProcess(
-                MpvExePath,
+                _mpvExePath,
                 arguments: mpvArgs
             );
 

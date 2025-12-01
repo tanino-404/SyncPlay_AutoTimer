@@ -1,9 +1,16 @@
 ﻿using v2;
 
 Console.WriteLine("================================================");
-Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 1 & 2");
-Console.WriteLine("  Keyboard Hook + HTTP Server + Syncplay");
+Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 1 & 2 & 3");
+Console.WriteLine("  Keyboard Hook + HTTP Server + Syncplay + Config");
 Console.WriteLine("================================================\n");
+
+// 設定ファイル読み込み（Phase 3）
+var configManager = new ConfigManager("config.ini");
+if (!configManager.LoadConfig())
+{
+    Console.WriteLine("[Program] Warning: Using hardcoded defaults.\n");
+}
 
 // プロセスマネージャー初期化（ジョブオブジェクト）
 var processManager = new ProcessManager();
@@ -16,11 +23,11 @@ keyboardHook.Initialize();
 // HTTP サーバー初期化（ポート 8080）
 var httpServer = new HttpServer(port: 8080);
 
-// Syncplay マネージャー初期化
-var syncplayManager = new SyncplayManager(processManager);
+// Syncplay マネージャー初期化（ConfigManager を渡す）
+var syncplayManager = new SyncplayManager(processManager, configManager);
 
-// MPV コントローラー初期化
-var mpvController = new MpvController(processManager);
+// MPV コントローラー初期化（ConfigManager を渡す）
+var mpvController = new MpvController(processManager, configManager);
 
 // HTTP サーバーのイベントハンドラ設定（Phase 2 統合）
 httpServer.OnToggle += (sender, e) =>

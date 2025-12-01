@@ -7,19 +7,25 @@ namespace v2;
 /// </summary>
 public class SyncplayManager : IDisposable
 {
-    // Syncplay インストールパス（ハードコード：Phase 3 で config.ini に移行）
-    private const string SyncplayServerPath = @"C:\Program Files (x86)\Syncplay\syncplayServer.exe";
-    private const string SyncplayClientPath = @"C:\Program Files (x86)\Syncplay\SyncplayConsole.exe";
+    // デフォルト設定（config.ini で上書き可能）
+    private const string DefaultSyncplayServerPath = @"C:\Program Files (x86)\Syncplay\syncplayServer.exe";
+    private const string DefaultSyncplayClientPath = @"C:\Program Files (x86)\Syncplay\SyncplayConsole.exe";
+    private const string DefaultServerIP = "192.168.100.13";
+    private const int DefaultServerPort = 8999;
+    private const string DefaultUserName = "Server";
+    private const string DefaultRoomName = "Test_Run";
+    private const string DefaultRoomPassword = "";
+    private const string DefaultVideoFilePath = @"..\Video\Terminal0_JP_Video_R_250915_v1.mp4";
 
-    // サーバー設定
-    private const string ServerIP = "192.168.100.13";
-    private const int ServerPort = 8999;
-
-    // クライアント設定
-    private const string UserName = "Server";
-    private const string RoomName = "Test_Run";
-    private const string RoomPassword = "";
-    private const string VideoFilePath = @"..\Video\Terminal0_JP_Video_R_250915_v1.mp4";
+    // 実際の設定値（ConfigManager から読み込まれる）
+    private string _syncplayServerPath;
+    private string _syncplayClientPath;
+    private string _serverIP;
+    private int _serverPort;
+    private string _userName;
+    private string _roomName;
+    private string _roomPassword;
+    private string _videoFilePath;
 
     // 管理するプロセス
     private Process? _serverProcess;
@@ -30,9 +36,33 @@ public class SyncplayManager : IDisposable
     public bool IsServerRunning => _serverProcess != null && !_serverProcess.HasExited;
     public bool IsClientRunning => _clientProcess != null && !_clientProcess.HasExited;
 
-    public SyncplayManager(ProcessManager processManager)
+    public SyncplayManager(ProcessManager processManager, ConfigManager? configManager = null)
     {
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
+
+        // ConfigManager から設定を読み込む、なければデフォルト値を使用
+        if (configManager != null)
+        {
+            _syncplayServerPath = configManager.GetValue("Syncplay", "SyncplayServerPath", DefaultSyncplayServerPath) ?? DefaultSyncplayServerPath;
+            _syncplayClientPath = configManager.GetValue("Syncplay", "SyncplayClientPath", DefaultSyncplayClientPath) ?? DefaultSyncplayClientPath;
+            _serverIP = configManager.GetValue("Syncplay", "ServerIP", DefaultServerIP) ?? DefaultServerIP;
+            _serverPort = configManager.GetInt("Syncplay", "ServerPort", DefaultServerPort);
+            _userName = configManager.GetValue("Syncplay", "UserName", DefaultUserName) ?? DefaultUserName;
+            _roomName = configManager.GetValue("Syncplay", "RoomName", DefaultRoomName) ?? DefaultRoomName;
+            _roomPassword = configManager.GetValue("Syncplay", "RoomPassword", DefaultRoomPassword) ?? "";
+            _videoFilePath = configManager.GetValue("Player", "VideoFilePath", DefaultVideoFilePath) ?? DefaultVideoFilePath;
+        }
+        else
+        {
+            _syncplayServerPath = DefaultSyncplayServerPath;
+            _syncplayClientPath = DefaultSyncplayClientPath;
+            _serverIP = DefaultServerIP;
+            _serverPort = DefaultServerPort;
+            _userName = DefaultUserName;
+            _roomName = DefaultRoomName;
+            _roomPassword = DefaultRoomPassword;
+            _videoFilePath = DefaultVideoFilePath;
+        }
     }
 
     /// <summary>
@@ -48,24 +78,24 @@ public class SyncplayManager : IDisposable
 
         try
         {
-            if (!File.Exists(SyncplayServerPath))
+            if (!File.Exists(_syncplayServerPath))
             {
-                throw new FileNotFoundException($"Syncplay Server executable not found: {SyncplayServerPath}");
+                throw new FileNotFoundException($"Syncplay Server executable not found: {_syncplayServerPath}");
             }
 
             Console.WriteLine("[SyncplayManager] Starting Syncplay Server...");
-            Console.WriteLine($"  Path: {SyncplayServerPath}");
-            Console.WriteLine($"  Binding to: {ServerIP}:{ServerPort}");
+            Console.WriteLine($"  Path: {_syncplayServerPath}");
+            Console.WriteLine($"  Binding to: {_serverIP}:{_serverPort}");
 
             // サーバー起動：--port, --password, --motd などのオプション可能
-            string serverArgs = $"--port {ServerPort}";
-            if (!string.IsNullOrEmpty(RoomPassword))
+            string serverArgs = $"--port {_serverPort}";
+            if (!string.IsNullOrEmpty(_roomPassword))
             {
-                serverArgs += $" --password \"{RoomPassword}\"";
+                serverArgs += $" --password \"{_roomPassword}\"";
             }
 
             _serverProcess = _processManager.StartManagedProcess(
-                SyncplayServerPath,
+                _syncplayServerPath,
                 arguments: serverArgs
             );
 
@@ -96,38 +126,38 @@ public class SyncplayManager : IDisposable
 
         try
         {
-            if (!File.Exists(SyncplayClientPath))
+            if (!File.Exists(_syncplayClientPath))
             {
-                throw new FileNotFoundException($"Syncplay Client executable not found: {SyncplayClientPath}");
+                throw new FileNotFoundException($"Syncplay Client executable not found: {_syncplayClientPath}");
             }
 
             Console.WriteLine("[SyncplayManager] Starting Syncplay Client...");
-            Console.WriteLine($"  Path: {SyncplayClientPath}");
-            Console.WriteLine($"  Connecting to: {ServerIP}:{ServerPort}");
-            Console.WriteLine($"  User: {UserName}");
-            Console.WriteLine($"  Room: {RoomName}");
-            Console.WriteLine($"  Video: {VideoFilePath}");
+            Console.WriteLine($"  Path: {_syncplayClientPath}");
+            Console.WriteLine($"  Connecting to: {_serverIP}:{_serverPort}");
+            Console.WriteLine($"  User: {_userName}");
+            Console.WriteLine($"  Room: {_roomName}");
+            Console.WriteLine($"  Video: {_videoFilePath}");
 
             // クライアント起動コマンド例
             // SyncplayConsole.exe --host SERVER_IP --port PORT --name USERNAME --room ROOM_NAME "video_file.mp4"
-            string clientArgs = $"--host {ServerIP} --port {ServerPort} --name {UserName} --room {RoomName}";
+            string clientArgs = $"--host {_serverIP} --port {_serverPort} --name {_userName} --room {_roomName}";
 
-            if (!string.IsNullOrEmpty(RoomPassword))
+            if (!string.IsNullOrEmpty(_roomPassword))
             {
-                clientArgs += $" --password \"{RoomPassword}\"";
+                clientArgs += $" --password \"{_roomPassword}\"";
             }
 
-            if (File.Exists(VideoFilePath))
+            if (File.Exists(_videoFilePath))
             {
-                clientArgs += $" \"{VideoFilePath}\"";
+                clientArgs += $" \"{_videoFilePath}\"";
             }
             else
             {
-                Console.WriteLine($"[SyncplayManager] Warning: Video file not found: {VideoFilePath}");
+                Console.WriteLine($"[SyncplayManager] Warning: Video file not found: {_videoFilePath}");
             }
 
             _clientProcess = _processManager.StartManagedProcess(
-                SyncplayClientPath,
+                _syncplayClientPath,
                 arguments: clientArgs
             );
 
