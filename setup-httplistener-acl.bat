@@ -8,6 +8,10 @@ setlocal enabledelayedexpansion
 REM Get the directory where this batch file is located
 set SCRIPT_DIR=%~dp0
 
+REM Set console window size and font (improves readability)
+REM Width=120 columns, Height=40 rows
+mode con: cols=120 lines=40
+
 REM Check if running as Administrator
 net session >nul 2>&1
 if %errorlevel% neq 0 (
