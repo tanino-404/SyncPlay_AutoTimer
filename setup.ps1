@@ -20,20 +20,74 @@ if (-not $isAdmin) {
 }
 
 # ========================================
-# Step 1: config.ini 確認
+# Step 1: config.ini フォルダ・ファイル作成
 # ========================================
-Write-Host "[Step 1] Checking config.ini..." -ForegroundColor Cyan
+Write-Host "[Step 1] Creating config.ini structure..." -ForegroundColor Cyan
 $documentsFolder = [Environment]::GetFolderPath("MyDocuments")
 $configDir = "$documentsFolder\SyncPlay_AutoTimer\Setting"
 $configFile = "$configDir\config.ini"
 
-if (Test-Path $configFile) {
-    Write-Host "✅ Config file exists: $configFile" -ForegroundColor Green
-    Write-Host "   You can customize settings by editing this file." -ForegroundColor Green
+# ディレクトリ作成
+if (-not (Test-Path $configDir)) {
+    Write-Host "ℹ️  Creating directory: $configDir" -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    Write-Host "✅ Directory created successfully" -ForegroundColor Green
 }
 else {
-    Write-Host "ℹ️  Config file will be auto-created on first run at:" -ForegroundColor Cyan
-    Write-Host "   $configFile" -ForegroundColor Gray
+    Write-Host "✅ Directory already exists: $configDir" -ForegroundColor Green
+}
+
+# config.ini ファイル作成
+if (-not (Test-Path $configFile)) {
+    Write-Host "ℹ️  Creating config.ini template..." -ForegroundColor Gray
+
+    $configTemplate = @"
+# SyncPlay_AutoTimer v2.0 Configuration File
+# Last updated: 2025-12-01
+
+[Syncplay]
+MpvPath=C:\Program Files\mpv\mpv.exe
+SyncplayServerPath=C:\Program Files (x86)\Syncplay\syncplayServer.exe
+SyncplayClientPath=C:\Program Files (x86)\Syncplay\SyncplayConsole.exe
+ServerIP=192.168.100.13
+ServerPort=8999
+UserName=Server
+RoomName=Test_Run
+RoomPassword=
+
+[Player]
+VideoFilePath=..\Video\Terminal0_JP_Video_R_250915_v1.mp4
+
+[Keyboard]
+KeyToggle=alt+ctrl+shift+p
+KeyQuit=alt+ctrl+shift+q
+KeyRestart=alt+ctrl+shift+r
+KeyStatus=alt+ctrl+shift+s
+
+[Network]
+ClientIPList=192.168.100.54
+HttpServerPort=8080
+CommandTimeout=500
+CommandRetry=2
+
+[Timing]
+TargetTimes=13:20,00:00,00:00,00:00
+AutoStopMinutes=1
+AutoPlayDelay=3
+
+[Mode]
+ServerMode=true
+AutoStopMode=true
+MinimizeStartMode=true
+DebugMode=false
+"@
+
+    Set-Content -Path $configFile -Value $configTemplate -Encoding UTF8
+    Write-Host "✅ config.ini created successfully: $configFile" -ForegroundColor Green
+}
+else {
+    Write-Host "✅ config.ini already exists: $configFile" -ForegroundColor Green
+    Write-Host "   You can customize settings by editing this file." -ForegroundColor Gray
 }
 Write-Host ""
 
