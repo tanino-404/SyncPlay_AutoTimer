@@ -23,7 +23,7 @@ if (-not $isAdmin) {
 # Step 1: config.ini 確認
 # ========================================
 Write-Host "[Step 1] Checking config.ini..." -ForegroundColor Cyan
-$documentsFolder = [Environment]::GetFolderPath([Environment]::SpecialFolder::MyDocuments)
+$documentsFolder = [Environment]::GetFolderPath("MyDocuments")
 $configDir = "$documentsFolder\SyncPlay_AutoTimer\Setting"
 $configFile = "$configDir\config.ini"
 
