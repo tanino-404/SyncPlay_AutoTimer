@@ -10,6 +10,7 @@ namespace v2;
 public class MpvController : IDisposable
 {
     private const string DefaultMpvExePath = @"C:\Program Files\mpv\mpv.exe";
+    private string _videoFilePath = "";
 
     private class MpvInstance
     {
@@ -17,6 +18,7 @@ public class MpvController : IDisposable
         public Process? Process { get; set; }
         public string PipeName { get; set; } = "";
         public bool IsRunning => Process != null && !Process.HasExited;
+        public bool IsPlaying { get; set; } = false;
     }
 
     private Dictionary<int, MpvInstance> _instances = new();
@@ -31,6 +33,7 @@ public class MpvController : IDisposable
         if (configManager != null)
         {
             _mpvExePath = configManager.GetValue("Syncplay", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
+            _videoFilePath = configManager.GetValue("Player", "VideoFilePath", "") ?? "";
         }
         else
         {
@@ -39,14 +42,22 @@ public class MpvController : IDisposable
     }
 
     /// <summary>
-    /// MPV インスタンスを起動（指定ディスプレイで動画再生）
+    /// MPV インスタンスを起動（指定ディスプレイで動画再生、バックグラウンド起動）
     /// </summary>
     public bool StartInstance(int displayIndex, string videoPath)
     {
         if (_instances.ContainsKey(displayIndex))
         {
-            Console.WriteLine($"[MpvController] Instance for display {displayIndex} already exists.");
-            return false;
+            if (_instances[displayIndex].IsRunning)
+            {
+                Console.WriteLine($"[MpvController] Instance for display {displayIndex} already exists and is running.");
+                return false;
+            }
+            else
+            {
+                // 停止済みインスタンスを削除して再作成
+                _instances.Remove(displayIndex);
+            }
         }
 
         try
@@ -68,10 +79,13 @@ public class MpvController : IDisposable
             Console.WriteLine($"  Video: {videoPath}");
             Console.WriteLine($"  IPC Pipe: {pipeName}");
 
-            // MPV 起動コマンド
+            // MPV 起動コマンド（バックグラウンド起動）
+            // --no-audio-display: 音声表示しない
+            // --window-scale=0.5: 小さなウィンドウサイズ（必要に応じて全画面に）
             // --input-ipc-server=\\.\pipe\PIPE_NAME で IPC パイプ設定
             // --screen=0,1,... で表示画面指定
-            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} \"{videoPath}\"";
+            // --pause: 起動時に一時停止（ユーザーが再生を開始するまで待機）
+            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --pause --no-terminal \"{videoPath}\"";
 
             var process = _processManager.StartManagedProcess(
                 _mpvExePath,
@@ -82,13 +96,14 @@ public class MpvController : IDisposable
             {
                 DisplayIndex = displayIndex,
                 Process = process,
-                PipeName = pipeName
+                PipeName = pipeName,
+                IsPlaying = false
             };
 
             _instances[displayIndex] = instance;
 
-            // IPC パイプ接続待機（1秒）
-            System.Threading.Thread.Sleep(1000);
+            // IPC パイプ接続待機（2秒）
+            System.Threading.Thread.Sleep(2000);
 
             Console.WriteLine($"[MpvController] MPV instance started for display {displayIndex} (PID: {process.Id})");
 
@@ -166,11 +181,53 @@ public class MpvController : IDisposable
     }
 
     /// <summary>
-    /// 再生/一時停止トグル
+    /// 再生/一時停止トグル（インスタンスがない場合は自動起動）
+    /// 再生時は全画面、停止時はバックグラウンドに設定
     /// </summary>
     public bool TogglePlayPause(int displayIndex)
     {
-        return SendCommand(displayIndex, "cycle", "pause");
+        // インスタンスがない場合は自動起動
+        if (!_instances.ContainsKey(displayIndex) || !_instances[displayIndex].IsRunning)
+        {
+            Console.WriteLine($"[MpvController] Instance for display {displayIndex} not found. Auto-starting...");
+
+            if (string.IsNullOrWhiteSpace(_videoFilePath))
+            {
+                Console.Error.WriteLine($"[MpvController] Video file path is not set in config.");
+                return false;
+            }
+
+            if (!StartInstance(displayIndex, _videoFilePath))
+            {
+                Console.Error.WriteLine($"[MpvController] Failed to auto-start instance for display {displayIndex}");
+                return false;
+            }
+        }
+
+        var instance = _instances[displayIndex];
+
+        // 再生/停止トグル
+        if (!SendCommand(displayIndex, "cycle", "pause"))
+        {
+            return false;
+        }
+
+        // 再生状態を更新
+        instance.IsPlaying = !instance.IsPlaying;
+
+        // 再生時は全画面、停止時はバックグラウンドに設定
+        if (instance.IsPlaying)
+        {
+            Console.WriteLine($"[MpvController] Setting display {displayIndex} to fullscreen...");
+            SendCommand(displayIndex, "set", "fullscreen", "yes");
+        }
+        else
+        {
+            Console.WriteLine($"[MpvController] Exiting fullscreen for display {displayIndex}...");
+            SendCommand(displayIndex, "set", "fullscreen", "no");
+        }
+
+        return true;
     }
 
     /// <summary>
