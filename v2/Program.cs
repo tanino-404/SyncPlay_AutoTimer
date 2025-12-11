@@ -5,6 +5,14 @@ Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 1 & 2 & 3");
 Console.WriteLine("  Keyboard Hook + HTTP Server + Syncplay + Config");
 Console.WriteLine("================================================\n");
 
+// 初回セットアップチェック
+var setupManager = new SetupManager();
+if (!setupManager.IsSetupCompleted())
+{
+    Console.WriteLine("[Program] First-time setup required.\n");
+    setupManager.RunInitialSetup();
+}
+
 // 設定ファイル読み込み（Phase 3）
 // Windows Documents フォルダ内の固定パスを使用
 var configManager = new ConfigManager();
@@ -18,12 +26,11 @@ if (!configManager.LoadConfig())
 var processManager = new ProcessManager();
 processManager.Initialize();
 
-// キーボードフック初期化
-var keyboardHook = new KeyboardHook();
-keyboardHook.Initialize();
+// キーボードフック初期化（ConfigManager を渡す）
+var keyboardHook = new KeyboardHook(configManager);
 
-// HTTP サーバー初期化（ポート 8080）
-var httpServer = new HttpServer(port: 8080);
+// HTTP サーバー初期化（config.ini から読み込み）
+var httpServer = new HttpServer(port: configManager.HttpServerPort);
 
 // Syncplay マネージャー初期化（ConfigManager を渡す）
 var syncplayManager = new SyncplayManager(processManager, configManager);
@@ -37,11 +44,8 @@ httpServer.OnToggle += (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Toggle Event ========");
     Console.WriteLine($"[Program] HTTP Toggle event received from {e.Path}");
 
-    // 全 MPV インスタンスで再生/一時停止をトグル
-    for (int display = 0; display < 2; display++)
-    {
-        mpvController.TogglePlayPause(display);
-    }
+    // 全インスタンスに対する統一的な制御（グローバルフラグベース）
+    mpvController.TogglePlayPauseAll();
 
     Console.WriteLine($"[Program] ===================================\n");
 };
@@ -104,9 +108,18 @@ catch (System.Net.HttpListenerException ex) when (ex.ErrorCode == 5)
 
 Console.WriteLine("\n[Program] System is running. Press Ctrl+C to exit.\n");
 
-// キーボード入力イベント監視タスク
-var monitoringTask = Task.Run(() =>
+// Windowsメッセージループを別スレッドで実行（キーボードフックに必要）
+// 重要: フック初期化とメッセージループは同じスレッドで実行する必要がある
+var messageLoopTask = Task.Run(() =>
 {
+    keyboardHook.Initialize();  // このスレッドでフックを初期化
+    keyboardHook.RunMessageLoop();  // 同じスレッドでメッセージループを実行
+});
+
+// キーボード入力イベント監視タスク
+var monitoringTask = Task.Run(async () =>
+{
+    using var httpClient = new HttpClient();
     while (true)
     {
         // キーボードイベントキューを定期的にチェック
@@ -114,11 +127,31 @@ var monitoringTask = Task.Run(() =>
         {
             Console.WriteLine($"[Program] Keyboard event queued: {keyEvent}");
 
-            // キー入力に応じて HTTP POST を送信するロジック
-            // Phase 2-3 で実装予定（ここではログ出力のみ）
+            // HTTP POST/GET を送信
+            try
+            {
+                string endpoint = $"http://localhost:{configManager.HttpServerPort}/api/{keyEvent.Action}";
+                HttpResponseMessage response;
+
+                // Statusは GET、それ以外は POST
+                if (keyEvent.Action == "status")
+                {
+                    response = await httpClient.GetAsync(endpoint);
+                }
+                else
+                {
+                    response = await httpClient.PostAsync(endpoint, null);
+                }
+
+                Console.WriteLine($"[Program] HTTP {(keyEvent.Action == "status" ? "GET" : "POST")} sent to {endpoint}: {response.StatusCode}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Program] HTTP request failed: {ex.Message}");
+            }
         }
 
-        Thread.Sleep(50);
+        await Task.Delay(50);
     }
 });
 

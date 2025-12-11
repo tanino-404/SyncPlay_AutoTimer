@@ -14,19 +14,9 @@ public class KeyboardHook : IDisposable
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
 
-    // キー入力状態の追跡（Alt, Ctrl, Shift の複合判定）
-    private bool _isAltPressed = false;
-    private bool _isCtrlPressed = false;
-    private bool _isShiftPressed = false;
-
-    // キーマッピング（Alt+Ctrl+Shift + キーコード → アクション）
-    private readonly Dictionary<int, string> _keyMap = new()
-    {
-        { 0x50, "toggle" },    // Alt+Ctrl+Shift+P
-        { 0x51, "quit" },      // Alt+Ctrl+Shift+Q
-        { 0x52, "restart" },   // Alt+Ctrl+Shift+R
-        { 0x53, "status" }     // Alt+Ctrl+Shift+S
-    };
+    // キーマッピング（キーコード → (アクション, 必要な修飾キー)）
+    private readonly Dictionary<int, (string Action, bool Alt, bool Ctrl, bool Shift)> _keyMap = new();
+    private readonly ConfigManager? _configManager;
 
     // イベントキュー（スレッドセーフ）
     public ConcurrentQueue<KeyEvent> EventQueue { get; } = new();
@@ -58,6 +48,33 @@ public class KeyboardHook : IDisposable
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
+    [DllImport("user32.dll")]
+    private static extern bool GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage([In] ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage([In] ref MSG lpMsg);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public UIntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     // VK_* キーコード（修飾キー判定用）
     private const int VK_LALT = 0xA4;
     private const int VK_RALT = 0xA5;
@@ -67,6 +84,11 @@ public class KeyboardHook : IDisposable
     private const int VK_RSHIFT = 0xA1;
 
     public bool IsInitialized { get; private set; } = false;
+
+    public KeyboardHook(ConfigManager? configManager = null)
+    {
+        _configManager = configManager;
+    }
 
     /// <summary>
     /// キーボードフックを初期化・開始
@@ -103,12 +125,54 @@ public class KeyboardHook : IDisposable
 
             IsInitialized = true;
             Console.WriteLine("[KeyboardHook] Initialized successfully.");
-            Console.WriteLine("Keyboard hook is now monitoring for Alt+Ctrl+Shift+P/Q/R/S input.");
+
+            // キーマップを config.ini から動的生成
+            LoadKeyBindingsFromConfig();
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[KeyboardHook] Initialization failed: {ex.Message}");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// config.ini からキーバインドを読み込む
+    /// </summary>
+    private void LoadKeyBindingsFromConfig()
+    {
+        if (_configManager != null)
+        {
+            var bindings = new Dictionary<string, string>
+            {
+                { "toggle", _configManager.GetValue("Keyboard", "KeyToggle", "alt+ctrl+shift+p")! },
+                { "quit", _configManager.GetValue("Keyboard", "KeyQuit", "alt+ctrl+shift+q")! },
+                { "restart", _configManager.GetValue("Keyboard", "KeyRestart", "alt+ctrl+shift+r")! },
+                { "status", _configManager.GetValue("Keyboard", "KeyStatus", "alt+ctrl+shift+s")! }
+            };
+
+            foreach (var (action, keyBinding) in bindings)
+            {
+                var (alt, ctrl, shift, keyCode) = _configManager.ParseKeyBinding(keyBinding);
+                if (keyCode > 0)
+                {
+                    _keyMap[keyCode] = (action, alt, ctrl, shift);
+                    Console.WriteLine($"[KeyboardHook] Loaded key binding: {keyBinding} → {action}");
+                }
+                else
+                {
+                    Console.WriteLine($"[KeyboardHook] ⚠️  Invalid key binding: {keyBinding} (action: {action})");
+                }
+            }
+        }
+        else
+        {
+            // フォールバック: デフォルトのハードコードマップ
+            Console.WriteLine("[KeyboardHook] ConfigManager not available, using default key bindings.");
+            _keyMap[0x50] = ("toggle", true, true, true);   // Alt+Ctrl+Shift+P
+            _keyMap[0x51] = ("quit", true, true, true);     // Alt+Ctrl+Shift+Q
+            _keyMap[0x52] = ("restart", true, true, true);  // Alt+Ctrl+Shift+R
+            _keyMap[0x53] = ("status", true, true, true);   // Alt+Ctrl+Shift+S
         }
     }
 
@@ -124,20 +188,23 @@ public class KeyboardHook : IDisposable
             // キーダウンイベントのみ処理
             if (wParam == (IntPtr)WM_KEYDOWN)
             {
-                // 修飾キー状態を更新
-                _isAltPressed = IsKeyPressed(VK_LALT) || IsKeyPressed(VK_RALT);
-                _isCtrlPressed = IsKeyPressed(VK_LCTRL) || IsKeyPressed(VK_RCTRL);
-                _isShiftPressed = IsKeyPressed(VK_LSHIFT) || IsKeyPressed(VK_RSHIFT);
+                // 修飾キー状態を取得
+                bool altPressed = IsKeyPressed(VK_LALT) || IsKeyPressed(VK_RALT);
+                bool ctrlPressed = IsKeyPressed(VK_LCTRL) || IsKeyPressed(VK_RCTRL);
+                bool shiftPressed = IsKeyPressed(VK_LSHIFT) || IsKeyPressed(VK_RSHIFT);
 
-                // Alt+Ctrl+Shift が同時押しされている場合、キーマップを確認
-                if (_isAltPressed && _isCtrlPressed && _isShiftPressed)
+                // キーマップから該当するアクションを検索
+                if (_keyMap.TryGetValue(vkCode, out var mapping))
                 {
-                    if (_keyMap.TryGetValue(vkCode, out var action))
+                    // 修飾キーが一致するか確認
+                    if (mapping.Alt == altPressed &&
+                        mapping.Ctrl == ctrlPressed &&
+                        mapping.Shift == shiftPressed)
                     {
                         var keyEvent = new KeyEvent
                         {
                             Timestamp = DateTime.UtcNow,
-                            Action = action,
+                            Action = mapping.Action,
                             Details = $"VK={vkCode:X2}"
                         };
 
@@ -157,6 +224,22 @@ public class KeyboardHook : IDisposable
     private bool IsKeyPressed(int vKey)
     {
         return (GetAsyncKeyState(vKey) & 0x8000) != 0;
+    }
+
+    /// <summary>
+    /// Windowsメッセージループを実行
+    /// キーボードフックを動作させるために必要
+    /// </summary>
+    public void RunMessageLoop()
+    {
+        Console.WriteLine("[KeyboardHook] Starting Windows message loop...");
+        MSG msg;
+        while (GetMessage(out msg, IntPtr.Zero, 0, 0))
+        {
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+        Console.WriteLine("[KeyboardHook] Message loop exited.");
     }
 
     /// <summary>

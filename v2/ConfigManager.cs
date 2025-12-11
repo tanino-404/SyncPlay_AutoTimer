@@ -32,6 +32,11 @@ public class ConfigManager
     public string ConfigDirectory => _configDirectory;
 
     /// <summary>
+    /// HTTPサーバーポート番号を取得
+    /// </summary>
+    public int HttpServerPort => int.Parse(GetValue("Network", "HttpServerPort", "8080") ?? "8080");
+
+    /// <summary>
     /// config.ini ファイルを読み込む
     /// ファイル/フォルダがない場合は自動作成
     /// </summary>
@@ -47,6 +52,9 @@ public class ConfigManager
                 Directory.CreateDirectory(_configDirectory);
                 Console.WriteLine($"[ConfigManager] ✅ Directory created: {_configDirectory}");
             }
+
+            // Videoフォルダの自動生成
+            EnsureVideoFolderExists();
 
             // ファイルが存在しない場合はテンプレートを作成
             if (!File.Exists(_configPath))
@@ -159,6 +167,52 @@ public class ConfigManager
     }
 
     /// <summary>
+    /// キーバインド文字列を解析して修飾キーとキーコードを返す
+    /// 形式: "alt+ctrl+shift+p" → (Alt=true, Ctrl=true, Shift=true, KeyCode=0x50)
+    /// 対応修飾キー: alt, ctrl, shift
+    /// 対応キー: a-z, 0-9 (大文字小文字区別なし)
+    /// </summary>
+    public (bool Alt, bool Ctrl, bool Shift, int KeyCode) ParseKeyBinding(string keyBinding)
+    {
+        bool alt = false, ctrl = false, shift = false;
+        int keyCode = 0;
+
+        var parts = keyBinding.ToLower().Split('+');
+        foreach (var part in parts)
+        {
+            switch (part.Trim())
+            {
+                case "alt":
+                    alt = true;
+                    break;
+                case "ctrl":
+                    ctrl = true;
+                    break;
+                case "shift":
+                    shift = true;
+                    break;
+                default:
+                    // 最後の部分が実際のキー
+                    if (part.Length == 1)
+                    {
+                        char key = part[0];
+                        if (key >= 'a' && key <= 'z')
+                        {
+                            keyCode = 0x41 + (key - 'a'); // A=0x41
+                        }
+                        else if (key >= '0' && key <= '9')
+                        {
+                            keyCode = 0x30 + (key - '0'); // 0=0x30
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return (alt, ctrl, shift, keyCode);
+    }
+
+    /// <summary>
     /// カンマ区切りの値を配列として取得
     /// </summary>
     public string[] GetArray(string section, string key, string[]? defaultValue = null)
@@ -173,6 +227,78 @@ public class ConfigManager
             .Select(s => s.Trim())
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToArray();
+    }
+
+    /// <summary>
+    /// Videoフォルダの存在を確認し、なければ作成
+    /// </summary>
+    private void EnsureVideoFolderExists()
+    {
+        try
+        {
+            string documentsFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string videoFolder = Path.Combine(documentsFolder, "SyncPlay_AutoTimer", "Video");
+
+            if (!Directory.Exists(videoFolder))
+            {
+                Console.WriteLine($"[ConfigManager] Video folder not found: {videoFolder}");
+                Console.WriteLine($"[ConfigManager] Creating Video folder...");
+                Directory.CreateDirectory(videoFolder);
+                Console.WriteLine($"[ConfigManager] ✅ Video folder created: {videoFolder}");
+
+                // Video.txt (README) を作成
+                string readmePath = Path.Combine(videoFolder, "Video.txt");
+                string readmeContent = @"# SyncPlay_AutoTimer Video Folder
+
+Place your video files here.
+
+Recommended structure:
+- display0.mp4 (for Display 0)
+- display1.mp4 (for Display 1)
+
+Update config.ini in the Setting folder to configure video paths:
+[Player]
+Display0VideoPath=..\Video\display0.mp4
+Display1VideoPath=..\Video\display1.mp4
+";
+                File.WriteAllText(readmePath, readmeContent, Encoding.UTF8);
+                Console.WriteLine($"[ConfigManager] ✅ Video.txt created: {readmePath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ConfigManager] Error creating Video folder: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 相対パスを絶対パスに解決
+    /// config.ini の親フォルダ（Setting/）を基準とする
+    /// </summary>
+    public string? ResolveVideoPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        // 絶対パスの場合はそのまま返す
+        if (Path.IsPathRooted(path))
+        {
+            return path;
+        }
+
+        // 相対パスの場合は config.ini の親フォルダから解決
+        try
+        {
+            string resolvedPath = Path.GetFullPath(Path.Combine(_configDirectory, path));
+            return resolvedPath;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ConfigManager] Error resolving path '{path}': {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -202,7 +328,7 @@ public class ConfigManager
     public static void GenerateTemplate(string outputPath = "config.ini")
     {
         string template = @"# SyncPlay_AutoTimer v2.0 Configuration File
-# Last updated: 2025-12-01
+# Last updated: 2025-12-11
 
 [Syncplay]
 MpvPath=C:\Program Files\mpv\mpv.exe
@@ -215,7 +341,8 @@ RoomName=Test_Run
 RoomPassword=
 
 [Player]
-VideoFilePath=..\Video\Terminal0_JP_Video_R_250915_v1.mp4
+Display0VideoPath=..\Video\display0.mp4
+Display1VideoPath=..\Video\display1.mp4
 
 [Keyboard]
 KeyToggle=alt+ctrl+shift+p

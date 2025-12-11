@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>v2</RootNamespace>
     <AssemblyName>SyncPlay_AutoTimer</AssemblyName>
+    <ApplicationIcon>..\Icon\SyncPlay_AutoTimer.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
