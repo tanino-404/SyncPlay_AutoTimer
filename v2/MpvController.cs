@@ -10,7 +10,7 @@ namespace v2;
 public class MpvController : IDisposable
 {
     private const string DefaultMpvExePath = @"C:\Program Files\mpv\mpv.exe";
-    private string _videoFilePath = "";
+    private Dictionary<int, string> _videoFilePaths = new();
 
     private class MpvInstance
     {
@@ -34,7 +34,22 @@ public class MpvController : IDisposable
         if (configManager != null)
         {
             _mpvExePath = configManager.GetValue("Syncplay", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
-            _videoFilePath = configManager.GetValue("Player", "VideoFilePath", "") ?? "";
+
+            // 各ディスプレイの動画パスを読み込み（2ディスプレイ固定）
+            for (int i = 0; i < 2; i++)
+            {
+                string? videoPath = configManager.GetValue("Player", $"Display{i}VideoPath");
+                if (!string.IsNullOrWhiteSpace(videoPath))
+                {
+                    // 相対パス解決
+                    string? resolvedPath = configManager.ResolveVideoPath(videoPath);
+                    if (!string.IsNullOrWhiteSpace(resolvedPath))
+                    {
+                        _videoFilePaths[i] = resolvedPath;
+                        Console.WriteLine($"[MpvController] Display {i} video path: {resolvedPath}");
+                    }
+                }
+            }
         }
         else
         {
@@ -83,10 +98,11 @@ public class MpvController : IDisposable
             // MPV 起動コマンド（バックグラウンド起動）
             // --no-audio-display: 音声表示しない
             // --input-ipc-server=\\.\pipe\PIPE_NAME で IPC パイプ設定
-            // --screen=0,1,... で表示画面指定
+            // --screen={N}: ウィンドウを配置する画面（0ベース）
+            // --fs-screen={N}: フルスクリーン表示する画面（0ベース）
             // --no-terminal: コンソール表示しない
             // 起動時に自動再生、フルスクリーンでの起動
-            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --no-terminal --fullscreen \"{videoPath}\"";
+            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --fs-screen={displayIndex} --no-terminal --fullscreen \"{videoPath}\"";
 
             var process = _processManager.StartManagedProcess(
                 _mpvExePath,
@@ -185,13 +201,19 @@ public class MpvController : IDisposable
         {
             Console.WriteLine($"[MpvController] Instance for display {displayIndex} not found. Auto-starting...");
 
-            if (string.IsNullOrWhiteSpace(_videoFilePath))
+            if (!_videoFilePaths.TryGetValue(displayIndex, out string? videoPath))
             {
-                Console.Error.WriteLine($"[MpvController] Video file path is not set in config.");
+                Console.Error.WriteLine($"[MpvController] Display {displayIndex}: Video file path is not configured in config.ini.");
                 return false;
             }
 
-            if (!StartInstance(displayIndex, _videoFilePath))
+            if (!File.Exists(videoPath))
+            {
+                Console.Error.WriteLine($"[MpvController] Display {displayIndex}: Video file not found: {videoPath}");
+                return false;
+            }
+
+            if (!StartInstance(displayIndex, videoPath))
             {
                 Console.Error.WriteLine($"[MpvController] Failed to auto-start instance for display {displayIndex}");
                 return false;
@@ -261,20 +283,30 @@ public class MpvController : IDisposable
         {
             Console.WriteLine("[MpvController] No running instances. Auto-starting all displays...");
 
-            if (string.IsNullOrWhiteSpace(_videoFilePath))
+            if (_videoFilePaths.Count == 0)
             {
-                Console.Error.WriteLine("[MpvController] Video file path is not set in config.");
+                Console.Error.WriteLine("[MpvController] No video file paths configured in config.ini.");
                 return;
             }
 
             // 全ディスプレイで起動（並列処理で高速化）
             var startTasks = new List<Task>();
-            for (int display = 0; display < 2; display++)
+            foreach (var kvp in _videoFilePaths)
             {
-                int displayIndex = display; // ラムダ式でのキャプチャ対策
+                int displayIndex = kvp.Key;
+                string videoPath = kvp.Value;
+
                 if (!_instances.ContainsKey(displayIndex) || !_instances[displayIndex].IsRunning)
                 {
-                    startTasks.Add(Task.Run(() => StartInstance(displayIndex, _videoFilePath)));
+                    startTasks.Add(Task.Run(() =>
+                    {
+                        if (!File.Exists(videoPath))
+                        {
+                            Console.Error.WriteLine($"[MpvController] Display {displayIndex}: Video file not found: {videoPath}");
+                            return;
+                        }
+                        StartInstance(displayIndex, videoPath);
+                    }));
                 }
             }
 

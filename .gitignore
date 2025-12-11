@@ -1,5 +1,7 @@
 *.mp4
 /Develop_Document
+/.backup
+/.claude
 nul
 v2/bin/
 v2/obj/
