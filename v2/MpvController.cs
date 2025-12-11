@@ -24,6 +24,7 @@ public class MpvController : IDisposable
     private Dictionary<int, MpvInstance> _instances = new();
     private readonly ProcessManager _processManager;
     private string _mpvExePath;
+    private bool _isGloballyPlaying = false;  // グローバル再生状態フラグ（全インスタンス統一制御用）
 
     public MpvController(ProcessManager processManager, ConfigManager? configManager = null)
     {
@@ -81,11 +82,11 @@ public class MpvController : IDisposable
 
             // MPV 起動コマンド（バックグラウンド起動）
             // --no-audio-display: 音声表示しない
-            // --window-scale=0.5: 小さなウィンドウサイズ（必要に応じて全画面に）
             // --input-ipc-server=\\.\pipe\PIPE_NAME で IPC パイプ設定
             // --screen=0,1,... で表示画面指定
-            // --pause: 起動時に一時停止（ユーザーが再生を開始するまで待機）
-            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --pause --no-terminal \"{videoPath}\"";
+            // --no-terminal: コンソール表示しない
+            // 起動時に自動再生、フルスクリーンでの起動
+            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --no-terminal --fullscreen \"{videoPath}\"";
 
             var process = _processManager.StartManagedProcess(
                 _mpvExePath,
@@ -135,16 +136,17 @@ public class MpvController : IDisposable
 
         try
         {
-            // JSON-RPC リクエスト構築
+            // MPV IPC JSON 形式（JSON-RPC 2.0標準ではなく、MPV独自形式）
+            // 正しい形式: {"command":["set_property","pause",true]}
             var jsonRequest = new
             {
-                jsonrpc = "2.0",
-                method = "command",
-                @params = new object[] { command }.Concat(args ?? Array.Empty<object?>()).ToArray(),
-                id = 1
+                command = new object[] { command }.Concat(args ?? Array.Empty<object?>()).ToArray()
             };
 
             string jsonString = JsonConvert.SerializeObject(jsonRequest) + "\n";
+
+            // デバッグ: 送信するJSON全体をログ出力
+            Console.WriteLine($"[MpvController] Sending JSON to display {displayIndex}: {jsonString.TrimEnd()}");
 
             // IPC パイプで送信
             using (var pipeClient = new NamedPipeClientStream(".", instance.PipeName, PipeDirection.InOut))
@@ -154,16 +156,8 @@ public class MpvController : IDisposable
                 var writer = new StreamWriter(pipeClient) { AutoFlush = true };
                 writer.WriteLine(jsonString);
 
-                // レスポンス受信（タイムアウト: 1秒）
-                pipeClient.ReadTimeout = 1000;
-                var reader = new StreamReader(pipeClient);
-                string? response = reader.ReadLine();
-
-                Console.WriteLine($"[MpvController] Command sent to display {displayIndex}: {command}");
-                if (response != null)
-                {
-                    Console.WriteLine($"[MpvController] Response: {response}");
-                }
+                // MPV IPC は非同期で送信のみで十分（レスポンス受信は必須ではない）
+                Console.WriteLine($"[MpvController] Command sent successfully to display {displayIndex}");
 
                 return true;
             }
@@ -202,33 +196,169 @@ public class MpvController : IDisposable
                 Console.Error.WriteLine($"[MpvController] Failed to auto-start instance for display {displayIndex}");
                 return false;
             }
+
+            // インスタンス起動後、初期状態は自動的に再生状態に設定
+            var newInstance = _instances[displayIndex];
+            newInstance.IsPlaying = true;
+
+            // 全画面に設定
+            Console.WriteLine($"[MpvController] Setting display {displayIndex} to fullscreen...");
+            SendCommand(displayIndex, "set_property", "fullscreen", true);
+
+            return true;
         }
 
         var instance = _instances[displayIndex];
 
-        // 再生/停止トグル
-        if (!SendCommand(displayIndex, "cycle", "pause"))
-        {
-            return false;
-        }
+        // 再生/停止の次の状態を決定
+        bool willPlay = !instance.IsPlaying;
 
-        // 再生状態を更新
-        instance.IsPlaying = !instance.IsPlaying;
-
-        // 再生時は全画面、停止時はバックグラウンドに設定
-        if (instance.IsPlaying)
+        // 再生/停止コマンド（pauseプロパティを直接操作）
+        if (willPlay)
         {
+            Console.WriteLine($"[MpvController] Playing display {displayIndex}...");
+            if (!SendCommand(displayIndex, "set_property", "pause", false))
+            {
+                return false;
+            }
+
+            // 再生時は全画面に設定
             Console.WriteLine($"[MpvController] Setting display {displayIndex} to fullscreen...");
-            SendCommand(displayIndex, "set", "fullscreen", "yes");
+            SendCommand(displayIndex, "set_property", "fullscreen", true);
         }
         else
         {
-            Console.WriteLine($"[MpvController] Exiting fullscreen for display {displayIndex}...");
-            SendCommand(displayIndex, "set", "fullscreen", "no");
+            Console.WriteLine($"[MpvController] Pausing display {displayIndex}...");
+            if (!SendCommand(displayIndex, "set_property", "pause", true))
+            {
+                return false;
+            }
+
+            // 停止時はフルスクリーンを維持（フルスクリーン解除コマンドを削除）
+            // Console.WriteLine($"[MpvController] Exiting fullscreen for display {displayIndex}...");
+            // SendCommand(displayIndex, "set_property", "fullscreen", false);
         }
+
+        // 再生状態を更新
+        instance.IsPlaying = willPlay;
 
         return true;
     }
+
+    /// <summary>
+    /// 全インスタンスに対する統一的な再生/一時停止トグル
+    /// グローバルフラグに基づいて、全インスタンスを同じ状態に制御
+    /// インスタンス間の遅延を最小化するため、迅速にコマンド送信
+    /// </summary>
+    public void TogglePlayPauseAll()
+    {
+        Console.WriteLine("[MpvController] ========== TogglePlayPauseAll (Global) ==========");
+
+        var allInstances = _instances.Values.ToList();
+
+        // インスタンスが存在しない、または全て停止している場合 → 全て起動 + 再生
+        if (allInstances.Count == 0 || allInstances.All(i => !i.IsRunning))
+        {
+            Console.WriteLine("[MpvController] No running instances. Auto-starting all displays...");
+
+            if (string.IsNullOrWhiteSpace(_videoFilePath))
+            {
+                Console.Error.WriteLine("[MpvController] Video file path is not set in config.");
+                return;
+            }
+
+            // 全ディスプレイで起動（並列処理で高速化）
+            var startTasks = new List<Task>();
+            for (int display = 0; display < 2; display++)
+            {
+                int displayIndex = display; // ラムダ式でのキャプチャ対策
+                if (!_instances.ContainsKey(displayIndex) || !_instances[displayIndex].IsRunning)
+                {
+                    startTasks.Add(Task.Run(() => StartInstance(displayIndex, _videoFilePath)));
+                }
+            }
+
+            // 全インスタンスの起動完了を待機
+            Task.WaitAll(startTasks.ToArray());
+
+            // 起動後、全インスタンスのfullscreen設定（並列処理で高速化）
+            var fullscreenTasks = _instances.Values.Where(i => i.IsRunning).Select(instance =>
+                Task.Run(() =>
+                {
+                    SendCommand(instance.DisplayIndex, "set_property", "fullscreen", true);
+                })
+            ).ToArray();
+
+            Task.WaitAll(fullscreenTasks);
+
+            // 状態更新
+            foreach (var instance in _instances.Values.Where(i => i.IsRunning))
+            {
+                instance.IsPlaying = true;
+            }
+
+            _isGloballyPlaying = true;
+            Console.WriteLine("[MpvController] All instances started and playing.");
+        }
+        // 全インスタンスが再生中 → 全て停止
+        else if (allInstances.All(i => i.IsRunning && i.IsPlaying))
+        {
+            Console.WriteLine("[MpvController] All instances playing. Pausing all...");
+
+            // 並列処理でコマンド送信（遅延削減）
+            var pauseTasks = allInstances.Select(instance =>
+                Task.Run(() =>
+                {
+                    SendCommand(instance.DisplayIndex, "set_property", "pause", true);
+                    // フルスクリーンを維持（フルスクリーン解除コマンドを削除）
+                    // SendCommand(instance.DisplayIndex, "set_property", "fullscreen", false);
+                })
+            ).ToArray();
+
+            Task.WaitAll(pauseTasks);
+
+            // 状態更新
+            foreach (var instance in allInstances)
+            {
+                instance.IsPlaying = false;
+            }
+
+            _isGloballyPlaying = false;
+            Console.WriteLine("[MpvController] All instances paused.");
+        }
+        // 全インスタンスが停止中 → 全て再生
+        else if (allInstances.All(i => i.IsRunning && !i.IsPlaying))
+        {
+            Console.WriteLine("[MpvController] All instances paused. Playing all...");
+
+            // 並列処理でコマンド送信（遅延削減）
+            var resumeTasks = allInstances.Select(instance =>
+                Task.Run(() =>
+                {
+                    SendCommand(instance.DisplayIndex, "set_property", "pause", false);
+                    SendCommand(instance.DisplayIndex, "set_property", "fullscreen", true);
+                })
+            ).ToArray();
+
+            Task.WaitAll(resumeTasks);
+
+            // 状態更新
+            foreach (var instance in allInstances)
+            {
+                instance.IsPlaying = true;
+            }
+
+            _isGloballyPlaying = true;
+            Console.WriteLine("[MpvController] All instances playing.");
+        }
+
+        Console.WriteLine("[MpvController] ================================================\n");
+    }
+
+    /// <summary>
+    /// グローバル再生状態フラグの取得
+    /// </summary>
+    public bool IsGloballyPlaying => _isGloballyPlaying;
 
     /// <summary>
     /// 再生速度設定
@@ -258,11 +388,13 @@ public class MpvController : IDisposable
             StopInstance(displayIndex);
         }
 
+        _isGloballyPlaying = false;
         Console.WriteLine("[MpvController] All MPV instances stopped.");
     }
 
     /// <summary>
     /// インスタンスを停止
+    /// まずJSON-RPC quitコマンドを試行し、失敗した場合はプロセスキルにフォールバック
     /// </summary>
     public void StopInstance(int displayIndex)
     {
@@ -276,7 +408,32 @@ public class MpvController : IDisposable
             if (instance.IsRunning)
             {
                 Console.WriteLine($"[MpvController] Stopping instance for display {displayIndex}");
-                _processManager.TerminateProcess(instance.Process!.Id);
+
+                // まずJSON-RPC quitコマンドを試行（クリーンな終了）
+                bool quitSuccess = SendCommand(displayIndex, "quit");
+
+                if (quitSuccess)
+                {
+                    // quitコマンド送信成功、プロセス終了を待機（最大2秒）
+                    bool exited = instance.Process!.WaitForExit(2000);
+
+                    if (exited)
+                    {
+                        Console.WriteLine($"[MpvController] Instance for display {displayIndex} exited cleanly via quit command");
+                    }
+                    else
+                    {
+                        // タイムアウト: プロセスキルにフォールバック
+                        Console.WriteLine($"[MpvController] Quit command timed out for display {displayIndex}, forcing termination");
+                        _processManager.TerminateProcess(instance.Process!.Id);
+                    }
+                }
+                else
+                {
+                    // quitコマンド送信失敗: プロセスキルにフォールバック
+                    Console.WriteLine($"[MpvController] Quit command failed for display {displayIndex}, forcing termination");
+                    _processManager.TerminateProcess(instance.Process!.Id);
+                }
             }
 
             _instances.Remove(displayIndex);
