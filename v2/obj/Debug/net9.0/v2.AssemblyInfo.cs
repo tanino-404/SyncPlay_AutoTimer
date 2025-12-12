@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SyncPlay_AutoTimer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ae0b9a5af52b8f8c7560b7beb9228a7233b49b12")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3439b7cccd21e5e73da972454345c4624ea07fb6")]
 [assembly: System.Reflection.AssemblyProductAttribute("SyncPlay_AutoTimer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SyncPlay_AutoTimer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

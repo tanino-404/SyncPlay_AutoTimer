@@ -37,6 +37,16 @@ public class ConfigManager
     public int HttpServerPort => int.Parse(GetValue("Network", "HttpServerPort", "8080") ?? "8080");
 
     /// <summary>
+    /// 起動時の最小化モードを取得
+    /// </summary>
+    public bool MinimizeStartMode => GetBool("Mode", "MinimizeStartMode", false);
+
+    /// <summary>
+    /// サーバーモードを取得
+    /// </summary>
+    public bool ServerMode => GetBool("Mode", "ServerMode", false);
+
+    /// <summary>
     /// config.ini ファイルを読み込む
     /// ファイル/フォルダがない場合は自動作成
     /// </summary>

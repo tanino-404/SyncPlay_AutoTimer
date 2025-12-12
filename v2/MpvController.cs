@@ -102,7 +102,7 @@ public class MpvController : IDisposable
             // --fs-screen={N}: フルスクリーン表示する画面（0ベース）
             // --no-terminal: コンソール表示しない
             // 起動時に自動再生、フルスクリーンでの起動
-            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --fs-screen={displayIndex} --no-terminal --fullscreen \"{videoPath}\"";
+            string mpvArgs = $"--input-ipc-server=\\\\.\\pipe\\{pipeName} --screen={displayIndex} --fs-screen={displayIndex} --no-terminal --fullscreen --ontop \"{videoPath}\"";
 
             var process = _processManager.StartManagedProcess(
                 _mpvExePath,

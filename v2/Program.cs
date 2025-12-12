@@ -22,6 +22,15 @@ if (!configManager.LoadConfig())
     Console.WriteLine("[Program] ⚠️  Warning: Config loading failed. Using hardcoded defaults.\n");
 }
 
+// Phase 3.7: コンソールウィンドウの自動最小化
+if (configManager.MinimizeStartMode)
+{
+    var consoleWindowManager = new ConsoleWindowManager();
+    Console.WriteLine("[Program] MinimizeStartMode is enabled. Minimizing console window in 2 seconds...\n");
+    Thread.Sleep(2000); // セットアップメッセージを表示してから最小化
+    consoleWindowManager.MinimizeWindow();
+}
+
 // プロセスマネージャー初期化（ジョブオブジェクト）
 var processManager = new ProcessManager();
 processManager.Initialize();
@@ -37,6 +46,24 @@ var syncplayManager = new SyncplayManager(processManager, configManager);
 
 // MPV コントローラー初期化（ConfigManager を渡す）
 var mpvController = new MpvController(processManager, configManager);
+
+// Phase 3.8: Syncplay 自動起動処理
+if (configManager.ServerMode)
+{
+    // ServerMode=true: Server + Client 起動（サーバとして動作）
+    Console.WriteLine("[Program] ServerMode is enabled. Starting Syncplay Server + Client...\n");
+    syncplayManager.StartServer();
+    Thread.Sleep(2000); // Server起動待機
+    syncplayManager.StartClient();
+    Console.WriteLine("[Program] Syncplay Server + Client started (Server mode).\n");
+}
+else
+{
+    // ServerMode=false: Client のみ起動（クライアントとして動作）
+    Console.WriteLine("[Program] ServerMode is disabled. Starting Syncplay Client only...\n");
+    syncplayManager.StartClient();
+    Console.WriteLine("[Program] Syncplay Client started (Client mode).\n");
+}
 
 // HTTP サーバーのイベントハンドラ設定（Phase 2 統合）
 httpServer.OnToggle += (sender, e) =>
