@@ -1,8 +1,8 @@
 ﻿using v2;
 
 Console.WriteLine("================================================");
-Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 1 & 2 & 3");
-Console.WriteLine("  Keyboard Hook + HTTP Server + Syncplay + Config");
+Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 3.10");
+Console.WriteLine("  Keyboard Hook + HTTP Server + Network Sync");
 Console.WriteLine("================================================\n");
 
 // 初回セットアップチェック
@@ -41,71 +41,55 @@ var keyboardHook = new KeyboardHook(configManager);
 // HTTP サーバー初期化（config.ini から読み込み）
 var httpServer = new HttpServer(port: configManager.HttpServerPort);
 
-// Syncplay マネージャー初期化（ConfigManager を渡す）
-var syncplayManager = new SyncplayManager(processManager, configManager);
-
 // MPV コントローラー初期化（ConfigManager を渡す）
 var mpvController = new MpvController(processManager, configManager);
 
-// Phase 3.8: Syncplay 自動起動処理
-if (configManager.ServerMode)
-{
-    // ServerMode=true: Server + Client 起動（サーバとして動作）
-    Console.WriteLine("[Program] ServerMode is enabled. Starting Syncplay Server + Client...\n");
-    syncplayManager.StartServer();
-    Thread.Sleep(2000); // Server起動待機
-    syncplayManager.StartClient();
-    Console.WriteLine("[Program] Syncplay Server + Client started (Server mode).\n");
-}
-else
-{
-    // ServerMode=false: Client のみ起動（クライアントとして動作）
-    Console.WriteLine("[Program] ServerMode is disabled. Starting Syncplay Client only...\n");
-    syncplayManager.StartClient();
-    Console.WriteLine("[Program] Syncplay Client started (Client mode).\n");
-}
+// Phase 3.10: ネットワーク同期マネージャー初期化
+var networkSyncManager = new NetworkSyncManager(configManager);
 
-// HTTP サーバーのイベントハンドラ設定（Phase 2 統合）
-httpServer.OnToggle += (sender, e) =>
+// HTTP サーバーのイベントハンドラ設定（Phase 3.10: ネットワーク同期統合）
+httpServer.OnToggle += async (sender, e) =>
 {
     Console.WriteLine($"\n[Program] ======== Toggle Event ========");
     Console.WriteLine($"[Program] HTTP Toggle event received from {e.Path}");
 
-    // 全インスタンスに対する統一的な制御（グローバルフラグベース）
+    // ローカルMPV制御（JSON-RPC）
     mpvController.TogglePlayPauseAll();
+
+    // 別機へブロードキャスト（ServerMode=true の場合のみ）
+    await networkSyncManager.BroadcastToggleAsync();
 
     Console.WriteLine($"[Program] ===================================\n");
 };
 
-httpServer.OnQuit += (sender, e) =>
+httpServer.OnQuit += async (sender, e) =>
 {
     Console.WriteLine($"\n[Program] ======== Quit Event ========");
     Console.WriteLine($"[Program] HTTP Quit event received from {e.Path}");
 
-    // Syncplay と MPV を全停止
+    // ローカルMPV停止（巻き戻し + 最小化）
     mpvController.StopAll();
-    syncplayManager.StopAll();
+
+    // 別機へブロードキャスト（ServerMode=true の場合のみ）
+    await networkSyncManager.BroadcastQuitAsync();
 
     Console.WriteLine($"[Program] Quit command processed.");
     Console.WriteLine($"[Program] ===================================\n");
 };
 
-httpServer.OnRestart += (sender, e) =>
+httpServer.OnRestart += async (sender, e) =>
 {
     Console.WriteLine($"\n[Program] ======== Restart Event ========");
     Console.WriteLine($"[Program] HTTP Restart event received from {e.Path}");
 
-    // Syncplay と MPV をリスタート
+    // ローカルMPV停止
     mpvController.StopAll();
-    syncplayManager.StopAll();
 
-    System.Threading.Thread.Sleep(1000);
+    // 別機へブロードキャスト（ServerMode=true の場合のみ）
+    await networkSyncManager.BroadcastRestartAsync();
 
-    syncplayManager.StartServer();
-    System.Threading.Thread.Sleep(2000);
-    syncplayManager.StartClient();
-
-    Console.WriteLine($"[Program] Restart command processed.");
+    // TODO: 再起動機能は Phase 3.11 で実装予定
+    Console.WriteLine($"[Program] ⚠️  Restart command processed (Stop only - Restart feature coming in Phase 3.11).");
     Console.WriteLine($"[Program] ===================================\n");
 };
 
@@ -114,7 +98,6 @@ httpServer.OnStatus += (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Status Check ========");
     Console.WriteLine($"[Program] HTTP Status check from {e.Path}");
 
-    syncplayManager.PrintStatus();
     mpvController.PrintStatus();
 
     Console.WriteLine($"[Program] ===================================\n");
@@ -187,11 +170,11 @@ AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
 {
     Console.WriteLine("\n[Program] Shutting down...");
     mpvController.StopAll();
-    syncplayManager.StopAll();
     keyboardHook.Shutdown();
     httpServer.Stop();
     httpServer.Dispose();
     keyboardHook.Dispose();
+    networkSyncManager.Dispose();
     processManager.Shutdown();
     processManager.Dispose();
     Console.WriteLine("[Program] All resources released. Goodbye!");
@@ -202,11 +185,11 @@ Console.CancelKeyPress += (sender, e) =>
     e.Cancel = true;
     Console.WriteLine("\n[Program] Ctrl+C detected. Shutting down...");
     mpvController.StopAll();
-    syncplayManager.StopAll();
     keyboardHook.Shutdown();
     httpServer.Stop();
     httpServer.Dispose();
     keyboardHook.Dispose();
+    networkSyncManager.Dispose();
     processManager.Shutdown();
     processManager.Dispose();
     Environment.Exit(0);
