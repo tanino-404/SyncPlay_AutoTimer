@@ -53,11 +53,12 @@ httpServer.OnToggle += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Toggle Event ========");
     Console.WriteLine($"[Program] HTTP Toggle event received from {e.Path}");
 
-    // ローカルMPV制御（JSON-RPC）
-    mpvController.TogglePlayPauseAll();
+    // ローカルMPV制御と別機ブロードキャストを並列実行（遅延削減）
+    var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
+    var broadcastTask = networkSyncManager.BroadcastToggleAsync();
 
-    // 別機へブロードキャスト（ServerMode=true の場合のみ）
-    await networkSyncManager.BroadcastToggleAsync();
+    // 両方の完了を待機
+    await Task.WhenAll(localTask, broadcastTask);
 
     Console.WriteLine($"[Program] ===================================\n");
 };
@@ -67,11 +68,12 @@ httpServer.OnQuit += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Quit Event ========");
     Console.WriteLine($"[Program] HTTP Quit event received from {e.Path}");
 
-    // ローカルMPV停止（巻き戻し + 最小化）
-    mpvController.StopAll();
+    // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
+    var localTask = Task.Run(() => mpvController.StopAll());
+    var broadcastTask = networkSyncManager.BroadcastQuitAsync();
 
-    // 別機へブロードキャスト（ServerMode=true の場合のみ）
-    await networkSyncManager.BroadcastQuitAsync();
+    // 両方の完了を待機
+    await Task.WhenAll(localTask, broadcastTask);
 
     Console.WriteLine($"[Program] Quit command processed.");
     Console.WriteLine($"[Program] ===================================\n");
@@ -82,11 +84,12 @@ httpServer.OnRestart += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Restart Event ========");
     Console.WriteLine($"[Program] HTTP Restart event received from {e.Path}");
 
-    // ローカルMPV停止
-    mpvController.StopAll();
+    // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
+    var localTask = Task.Run(() => mpvController.StopAll());
+    var broadcastTask = networkSyncManager.BroadcastRestartAsync();
 
-    // 別機へブロードキャスト（ServerMode=true の場合のみ）
-    await networkSyncManager.BroadcastRestartAsync();
+    // 両方の完了を待機
+    await Task.WhenAll(localTask, broadcastTask);
 
     // TODO: 再起動機能は Phase 3.11 で実装予定
     Console.WriteLine($"[Program] ⚠️  Restart command processed (Stop only - Restart feature coming in Phase 3.11).");
