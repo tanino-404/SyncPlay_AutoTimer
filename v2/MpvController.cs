@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Timers;
 using Newtonsoft.Json;
 
 namespace v2;
@@ -26,6 +27,11 @@ public class MpvController : IDisposable
     private string _mpvExePath;
     private bool _isGloballyPlaying = false;  // グローバル再生状態フラグ（全インスタンス統一制御用）
 
+    // Phase 3.11.1: 最前面化タイマー
+    private System.Timers.Timer? _topMostTimer;
+    private readonly int _topMostIntervalMs;
+    private bool _isTopMostTimerRunning = false;
+
     public MpvController(ProcessManager processManager, ConfigManager? configManager = null)
     {
         _processManager = processManager ?? throw new ArgumentNullException(nameof(processManager));
@@ -34,6 +40,7 @@ public class MpvController : IDisposable
         if (configManager != null)
         {
             _mpvExePath = configManager.GetValue("Syncplay", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
+            _topMostIntervalMs = configManager.TopMostIntervalMs;
 
             // 各ディスプレイの動画パスを読み込み（2ディスプレイ固定）
             for (int i = 0; i < 2; i++)
@@ -54,7 +61,10 @@ public class MpvController : IDisposable
         else
         {
             _mpvExePath = DefaultMpvExePath;
+            _topMostIntervalMs = 100; // デフォルト値
         }
+
+        Console.WriteLine($"[MpvController] TopMost monitoring interval: {_topMostIntervalMs}ms");
     }
 
     /// <summary>
@@ -331,6 +341,9 @@ public class MpvController : IDisposable
 
             _isGloballyPlaying = true;
             Console.WriteLine("[MpvController] All instances started and playing.");
+
+            // Phase 3.11.1: MPV起動完了後、最前面化監視タイマーを開始
+            StartTopMostMonitoring();
         }
         // 全インスタンスが再生中 → 全て停止
         else if (allInstances.All(i => i.IsRunning && i.IsPlaying))
@@ -393,6 +406,83 @@ public class MpvController : IDisposable
     public bool IsGloballyPlaying => _isGloballyPlaying;
 
     /// <summary>
+    /// Phase 3.11.1: 最前面化監視タイマーを開始
+    /// MPV起動中のみタイマーを設定、重複防止あり
+    /// </summary>
+    private void StartTopMostMonitoring()
+    {
+        // 既にタイマーが動作中の場合は何もしない（重複防止）
+        if (_isTopMostTimerRunning)
+        {
+            Console.WriteLine("[MpvController] TopMost monitoring already running. Skipping.");
+            return;
+        }
+
+        // MPVインスタンスが起動していない場合は起動しない
+        if (!_instances.Values.Any(i => i.IsRunning))
+        {
+            Console.WriteLine("[MpvController] No running MPV instances. TopMost monitoring not started.");
+            return;
+        }
+
+        Console.WriteLine($"[MpvController] Starting TopMost monitoring (interval: {_topMostIntervalMs}ms)...");
+
+        _topMostTimer = new System.Timers.Timer(_topMostIntervalMs);
+        _topMostTimer.Elapsed += OnTopMostTimerElapsed;
+        _topMostTimer.AutoReset = true;
+        _topMostTimer.Start();
+        _isTopMostTimerRunning = true;
+
+        Console.WriteLine("[MpvController] TopMost monitoring started.");
+    }
+
+    /// <summary>
+    /// Phase 3.11.1: 最前面化監視タイマーを停止
+    /// </summary>
+    private void StopTopMostMonitoring()
+    {
+        if (_topMostTimer != null)
+        {
+            Console.WriteLine("[MpvController] Stopping TopMost monitoring...");
+            _topMostTimer.Stop();
+            _topMostTimer.Elapsed -= OnTopMostTimerElapsed;
+            _topMostTimer.Dispose();
+            _topMostTimer = null;
+            _isTopMostTimerRunning = false;
+            Console.WriteLine("[MpvController] TopMost monitoring stopped.");
+        }
+    }
+
+    /// <summary>
+    /// Phase 3.11.1: タイマーイベントハンドラ（定期的に最前面化コマンドを送信）
+    /// </summary>
+    private void OnTopMostTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        // 全ての起動中のインスタンスに最前面化コマンドを送信
+        var runningInstances = _instances.Values.Where(i => i.IsRunning).ToList();
+
+        if (runningInstances.Count == 0)
+        {
+            // MPVが全て停止している場合はタイマーを停止
+            StopTopMostMonitoring();
+            return;
+        }
+
+        foreach (var instance in runningInstances)
+        {
+            try
+            {
+                SendCommand(instance.DisplayIndex, "set_property", "ontop", true);
+            }
+            catch (Exception ex)
+            {
+                // エラー時のみログ出力、タイマーは継続
+                Console.Error.WriteLine($"[MpvController] TopMost command error for display {instance.DisplayIndex}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// 再生速度設定
     /// </summary>
     public bool SetPlaybackSpeed(int displayIndex, double speed)
@@ -413,6 +503,9 @@ public class MpvController : IDisposable
     /// </summary>
     public void StopAll()
     {
+        // Phase 3.11.1: 最前面化監視タイマーを停止
+        StopTopMostMonitoring();
+
         var displayIndices = _instances.Keys.ToList();
 
         foreach (var displayIndex in displayIndices)
@@ -497,12 +590,14 @@ public class MpvController : IDisposable
 
     public void Dispose()
     {
+        StopTopMostMonitoring();
         StopAll();
         GC.SuppressFinalize(this);
     }
 
     ~MpvController()
     {
+        StopTopMostMonitoring();
         StopAll();
     }
 }

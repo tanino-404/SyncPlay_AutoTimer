@@ -47,6 +47,11 @@ public class ConfigManager
     public bool ServerMode => GetBool("Mode", "ServerMode", false);
 
     /// <summary>
+    /// 最前面化タイマーの実行間隔（ミリ秒）を取得
+    /// </summary>
+    public int TopMostIntervalMs => GetInt("Player", "TopMostIntervalMs", 100);
+
+    /// <summary>
     /// config.ini ファイルを読み込む
     /// ファイル/フォルダがない場合は自動作成
     /// </summary>
@@ -353,6 +358,7 @@ RoomPassword=
 [Player]
 Display0VideoPath=..\Video\display0.mp4
 Display1VideoPath=..\Video\display1.mp4
+TopMostIntervalMs=100
 
 [Keyboard]
 KeyToggle=alt+ctrl+shift+p
