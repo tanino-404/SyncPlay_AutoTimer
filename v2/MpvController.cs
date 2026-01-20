@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Timers;
 using Newtonsoft.Json;
 
@@ -10,6 +11,15 @@ namespace v2;
 /// </summary>
 public class MpvController : IDisposable
 {
+    // Phase 3.11.2: Windows API for SetWindowPos (TopMost enforcement)
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_SHOWWINDOW = 0x0040;
     private const string DefaultMpvExePath = @"C:\Program Files\mpv\mpv.exe";
     private Dictionary<int, string> _videoFilePaths = new();
 
@@ -454,7 +464,8 @@ public class MpvController : IDisposable
     }
 
     /// <summary>
-    /// Phase 3.11.1: タイマーイベントハンドラ（定期的に最前面化コマンドを送信）
+    /// Phase 3.11.2: タイマーイベントハンドラ（定期的に最前面化コマンドを送信）
+    /// Windows API SetWindowPos による強制的な最前面化
     /// </summary>
     private void OnTopMostTimerElapsed(object? sender, ElapsedEventArgs e)
     {
@@ -472,7 +483,16 @@ public class MpvController : IDisposable
         {
             try
             {
-                SendCommand(instance.DisplayIndex, "set_property", "ontop", true);
+                // Phase 3.11.2: Windows API SetWindowPos方式による最前面化
+                if (instance.Process != null && !instance.Process.HasExited)
+                {
+                    IntPtr hwnd = instance.Process.MainWindowHandle;
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                    }
+                }
             }
             catch (Exception ex)
             {
