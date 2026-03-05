@@ -6,7 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>v2</RootNamespace>
-    <AssemblyName>SyncPlay_AutoTimer</AssemblyName>
+    <AssemblyName>SyncPlayAutoTimer</AssemblyName>
+    <Version>2.5.0</Version>
     <ApplicationIcon>..\Icon\SyncPlay_AutoTimer.ico</ApplicationIcon>
   </PropertyGroup>
 

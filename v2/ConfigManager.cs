@@ -52,6 +52,21 @@ public class ConfigManager
     public int TopMostIntervalMs => GetInt("Player", "TopMostIntervalMs", 100);
 
     /// <summary>
+    /// スケジュールモードを取得（ServerMode=true の場合のみ有効）
+    /// </summary>
+    public bool ScheduleMode => GetBool("Mode", "ScheduleMode", false);
+
+    /// <summary>
+    /// ループモードを取得（動画終了後にアプリケーション側で自動再起動）
+    /// </summary>
+    public bool LoopMode => GetBool("Mode", "LoopMode", false);
+
+    /// <summary>
+    /// スケジュール時刻リストを取得（HH:MM または HH:MM:SS 形式）
+    /// </summary>
+    public TimeSpan[] TargetTimes => ParseTargetTimes(GetValue("Timing", "TargetTimes", ""));
+
+    /// <summary>
     /// config.ini ファイルを読み込む
     /// ファイル/フォルダがない場合は自動作成
     /// </summary>
@@ -245,6 +260,44 @@ public class ConfigManager
     }
 
     /// <summary>
+    /// TargetTimes 文字列を TimeSpan 配列にパース
+    /// 対応形式: HH:MM または HH:MM:SS（カンマ区切り）
+    /// </summary>
+    private TimeSpan[] ParseTargetTimes(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Array.Empty<TimeSpan>();
+        }
+
+        var result = new List<TimeSpan>();
+        var parts = value.Split(',');
+
+        foreach (var part in parts)
+        {
+            string trimmed = part.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+                continue;
+
+            // HH:MM:SS または HH:MM 形式をパース
+            if (TimeSpan.TryParse(trimmed, out TimeSpan time))
+            {
+                // 00:00:00 は無効値として扱う（スキップ）
+                if (time != TimeSpan.Zero)
+                {
+                    result.Add(time);
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[ConfigManager] Invalid time format: '{trimmed}' (expected HH:MM or HH:MM:SS)");
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    /// <summary>
     /// Videoフォルダの存在を確認し、なければ作成
     /// </summary>
     private void EnsureVideoFolderExists()
@@ -263,7 +316,7 @@ public class ConfigManager
 
                 // Video.txt (README) を作成
                 string readmePath = Path.Combine(videoFolder, "Video.txt");
-                string readmeContent = @"# SyncPlay_AutoTimer Video Folder
+                string readmeContent = @"# Sync Play Auto Timer Video Folder
 
 Place your video files here.
 
@@ -342,23 +395,27 @@ Display1VideoPath=..\Video\display1.mp4
     /// </summary>
     public static void GenerateTemplate(string outputPath = "config.ini")
     {
-        string template = @"# SyncPlay_AutoTimer v2.0 Configuration File
-# Last updated: 2025-12-11
+        string template = @"# Sync Play Auto Timer v2.5.0 Configuration File
+# Last updated: 2026-03-05
 
-[Syncplay]
-MpvPath=C:\Program Files\mpv\mpv.exe
-SyncplayServerPath=C:\Program Files (x86)\Syncplay\syncplayServer.exe
-SyncplayClientPath=C:\Program Files (x86)\Syncplay\SyncplayConsole.exe
-ServerIP=192.168.100.13
-ServerPort=8999
-UserName=Server
-RoomName=Test_Run
-RoomPassword=
+[Mode]
+ServerMode=true
+ScheduleMode=true
+LoopMode=true
+MinimizeStartMode=true
+DebugMode=false
 
 [Player]
+MpvPath=C:\Program Files\mpv\mpv.exe
 Display0VideoPath=..\Video\display0.mp4
 Display1VideoPath=..\Video\display1.mp4
 TopMostIntervalMs=100
+
+[Network]
+ClientIPList=192.168.1.1
+HttpServerPort=8080
+CommandTimeout=500
+CommandRetry=2
 
 [Keyboard]
 KeyToggle=alt+ctrl+shift+p
@@ -366,22 +423,8 @@ KeyQuit=alt+ctrl+shift+q
 KeyRestart=alt+ctrl+shift+r
 KeyStatus=alt+ctrl+shift+s
 
-[Network]
-ClientIPList=192.168.100.54
-HttpServerPort=8080
-CommandTimeout=500
-CommandRetry=2
-
 [Timing]
-TargetTimes=13:20,00:00,00:00,00:00
-AutoStopMinutes=1
-AutoPlayDelay=3
-
-[Mode]
-ServerMode=true
-AutoStopMode=true
-MinimizeStartMode=true
-DebugMode=false
+TargetTimes=09:00,14:00,18:30
 ";
 
         try

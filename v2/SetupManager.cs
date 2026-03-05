@@ -85,7 +85,7 @@ public class SetupManager
     public void RunInitialSetup()
     {
         Console.WriteLine("================================================");
-        Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Initial Setup");
+        Console.WriteLine("  Sync Play Auto Timer v2.5.0 - Initial Setup");
         Console.WriteLine("================================================\n");
 
         // 管理者権限チェック
@@ -237,9 +237,7 @@ public class SetupManager
     {
         var apps = new Dictionary<string, string>
         {
-            { "MPV", @"C:\Program Files\mpv\mpv.exe" },
-            { "Syncplay Server", @"C:\Program Files (x86)\Syncplay\syncplayServer.exe" },
-            { "Syncplay Client", @"C:\Program Files (x86)\Syncplay\SyncplayConsole.exe" }
+            { "MPV", @"C:\Program Files\mpv\mpv.exe" }
         };
 
         bool allFound = true;
@@ -261,7 +259,6 @@ public class SetupManager
         {
             Console.WriteLine("\n[SetupManager] Please install missing applications:");
             Console.WriteLine("  - MPV: https://mpv.io");
-            Console.WriteLine("  - Syncplay: https://syncplay.pl");
         }
     }
 

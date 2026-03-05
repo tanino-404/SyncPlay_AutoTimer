@@ -49,7 +49,7 @@ public class MpvController : IDisposable
         // ConfigManager から設定を読み込む、なければデフォルト値を使用
         if (configManager != null)
         {
-            _mpvExePath = configManager.GetValue("Syncplay", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
+            _mpvExePath = configManager.GetValue("Player", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
             _topMostIntervalMs = configManager.TopMostIntervalMs;
 
             // 各ディスプレイの動画パスを読み込み（2ディスプレイ固定）
@@ -416,6 +416,21 @@ public class MpvController : IDisposable
     public bool IsGloballyPlaying => _isGloballyPlaying;
 
     /// <summary>
+    /// Phase 5: 全インスタンスが自然終了した時に発火するイベント
+    /// ユーザー操作（StopAll/Quit）による終了では発火しない
+    /// </summary>
+    public event Action? OnAllInstancesExited;
+
+    /// <summary>
+    /// 起動中の MPV インスタンスが存在するか確認
+    /// Phase 4: スケジュール機能の2重起動防止用
+    /// </summary>
+    public bool HasRunningInstances()
+    {
+        return _instances.Values.Any(i => i.IsRunning);
+    }
+
+    /// <summary>
     /// Phase 3.11.1: 最前面化監視タイマーを開始
     /// MPV起動中のみタイマーを設定、重複防止あり
     /// </summary>
@@ -474,8 +489,19 @@ public class MpvController : IDisposable
 
         if (runningInstances.Count == 0)
         {
+            // _isGloballyPlaying が true のまま全インスタンスが停止 → 動画の自然終了
+            bool wasNaturalExit = _isGloballyPlaying;
+
             // MPVが全て停止している場合はタイマーを停止
             StopTopMostMonitoring();
+
+            if (wasNaturalExit)
+            {
+                Console.WriteLine("[MpvController] All instances exited naturally (video ended).");
+                _isGloballyPlaying = false;
+                OnAllInstancesExited?.Invoke();
+            }
+
             return;
         }
 

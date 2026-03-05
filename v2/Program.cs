@@ -1,8 +1,9 @@
 ﻿using v2;
 
 Console.WriteLine("================================================");
-Console.WriteLine("  SyncPlay_AutoTimer v2.0 - Phase 3.10");
+Console.WriteLine("  Sync Play Auto Timer v2.5.0");
 Console.WriteLine("  Keyboard Hook + HTTP Server + Network Sync");
+Console.WriteLine("  + Schedule + Loop Mode");
 Console.WriteLine("================================================\n");
 
 // 初回セットアップチェック
@@ -46,6 +47,10 @@ var mpvController = new MpvController(processManager, configManager);
 
 // Phase 3.10: ネットワーク同期マネージャー初期化
 var networkSyncManager = new NetworkSyncManager(configManager);
+
+// Phase 4: スケジュールマネージャー初期化
+// スケジュールトリガー時は /api/toggle と同等の処理を実行
+ScheduleManager? scheduleManager = null;
 
 // HTTP サーバーのイベントハンドラ設定（Phase 3.10: ネットワーク同期統合）
 httpServer.OnToggle += async (sender, e) =>
@@ -119,6 +124,43 @@ catch (System.Net.HttpListenerException ex) when (ex.ErrorCode == 5)
     Console.WriteLine("[Program] To test HTTP endpoints, run as Administrator.\n");
 }
 
+// Phase 5: ループモード（動画終了後にアプリケーション側で自動再起動）
+if (configManager.LoopMode)
+{
+    Console.WriteLine("[Program] LoopMode enabled. Videos will restart automatically after ending.");
+    mpvController.OnAllInstancesExited += () =>
+    {
+        Console.WriteLine("[Program] ======== Loop Restart ========");
+
+        var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
+        var broadcastTask = networkSyncManager.BroadcastToggleAsync();
+        Task.WhenAll(localTask, broadcastTask).Wait();
+
+        Console.WriteLine("[Program] ================================\n");
+    };
+}
+
+// Phase 4: スケジュールマネージャー開始
+// スケジュールトリガー時は /api/toggle と同等の処理を実行（ローカル MPV 起動 + ネットワークブロードキャスト）
+scheduleManager = new ScheduleManager(
+    configManager,
+    onScheduleTriggered: () =>
+    {
+        Console.WriteLine("[Program] ======== Schedule Triggered ========");
+
+        // ローカル MPV 制御と別機ブロードキャストを並列実行（/api/toggle と同じ処理）
+        var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
+        var broadcastTask = networkSyncManager.BroadcastToggleAsync();
+
+        // 両方の完了を待機
+        Task.WhenAll(localTask, broadcastTask).Wait();
+
+        Console.WriteLine("[Program] =========================================\n");
+    },
+    isMpvRunning: () => mpvController.HasRunningInstances()
+);
+scheduleManager.Start();
+
 Console.WriteLine("\n[Program] System is running. Press Ctrl+C to exit.\n");
 
 // Windowsメッセージループを別スレッドで実行（キーボードフックに必要）
@@ -172,12 +214,14 @@ var monitoringTask = Task.Run(async () =>
 AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
 {
     Console.WriteLine("\n[Program] Shutting down...");
+    scheduleManager?.Stop();
     mpvController.StopAll();
     keyboardHook.Shutdown();
     httpServer.Stop();
     httpServer.Dispose();
     keyboardHook.Dispose();
     networkSyncManager.Dispose();
+    scheduleManager?.Dispose();
     processManager.Shutdown();
     processManager.Dispose();
     Console.WriteLine("[Program] All resources released. Goodbye!");
@@ -187,12 +231,14 @@ Console.CancelKeyPress += (sender, e) =>
 {
     e.Cancel = true;
     Console.WriteLine("\n[Program] Ctrl+C detected. Shutting down...");
+    scheduleManager?.Stop();
     mpvController.StopAll();
     keyboardHook.Shutdown();
     httpServer.Stop();
     httpServer.Dispose();
     keyboardHook.Dispose();
     networkSyncManager.Dispose();
+    scheduleManager?.Dispose();
     processManager.Shutdown();
     processManager.Dispose();
     Environment.Exit(0);
