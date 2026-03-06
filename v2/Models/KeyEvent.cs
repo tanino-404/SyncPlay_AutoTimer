@@ -16,7 +16,6 @@ public class KeyEvent
 
     public override string ToString()
     {
-        return $"[{Timestamp:HH:mm:ss.fff}] Action: {Action}" +
-               (Details != null ? $" - {Details}" : "");
+        return $"{Action} ({Timestamp:HH:mm:ss})";
     }
 }

@@ -124,7 +124,6 @@ public class KeyboardHook : IDisposable
             }
 
             IsInitialized = true;
-            Console.WriteLine("[KeyboardHook] Initialized successfully.");
 
             // キーマップを config.ini から動的生成
             LoadKeyBindingsFromConfig();
@@ -157,7 +156,6 @@ public class KeyboardHook : IDisposable
                 if (keyCode > 0)
                 {
                     _keyMap[keyCode] = (action, alt, ctrl, shift);
-                    Console.WriteLine($"[KeyboardHook] Loaded key binding: {keyBinding} → {action}");
                 }
                 else
                 {
@@ -203,13 +201,13 @@ public class KeyboardHook : IDisposable
                     {
                         var keyEvent = new KeyEvent
                         {
-                            Timestamp = DateTime.UtcNow,
+                            Timestamp = DateTime.Now,
                             Action = mapping.Action,
                             Details = $"VK={vkCode:X2}"
                         };
 
                         EventQueue.Enqueue(keyEvent);
-                        Console.WriteLine($"[KeyboardHook] Detected: {keyEvent}");
+                        Console.WriteLine($"\n[KeyboardHook] Detected: {keyEvent}");
                     }
                 }
             }
@@ -232,14 +230,12 @@ public class KeyboardHook : IDisposable
     /// </summary>
     public void RunMessageLoop()
     {
-        Console.WriteLine("[KeyboardHook] Starting Windows message loop...");
         MSG msg;
         while (GetMessage(out msg, IntPtr.Zero, 0, 0))
         {
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
         }
-        Console.WriteLine("[KeyboardHook] Message loop exited.");
     }
 
     /// <summary>

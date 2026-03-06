@@ -63,12 +63,8 @@ public class ScheduleManager : IDisposable
             return false;
         }
 
-        Console.WriteLine("[ScheduleManager] Starting schedule monitoring...");
-        Console.WriteLine($"[ScheduleManager] Configured times ({_targetTimes.Length}):");
-        foreach (var time in _targetTimes)
-        {
-            Console.WriteLine($"  - {time:hh\\:mm\\:ss}");
-        }
+        Console.WriteLine($"[ScheduleManager] Schedule: {string.Join(", ", _targetTimes.Select(t => t.ToString(@"hh\:mm")))}");
+
 
         // 1秒間隔でチェック（秒単位の精度）
         _checkTimer = new System.Timers.Timer(1000);
@@ -76,8 +72,6 @@ public class ScheduleManager : IDisposable
         _checkTimer.AutoReset = true;
         _checkTimer.Start();
         _isRunning = true;
-
-        Console.WriteLine("[ScheduleManager] Schedule monitoring started (1 second interval)");
         return true;
     }
 
@@ -88,13 +82,11 @@ public class ScheduleManager : IDisposable
     {
         if (_checkTimer != null)
         {
-            Console.WriteLine("[ScheduleManager] Stopping schedule monitoring...");
             _checkTimer.Stop();
             _checkTimer.Elapsed -= OnCheckTimerElapsed;
             _checkTimer.Dispose();
             _checkTimer = null;
             _isRunning = false;
-            Console.WriteLine("[ScheduleManager] Schedule monitoring stopped");
         }
     }
 
@@ -117,7 +109,6 @@ public class ScheduleManager : IDisposable
             {
                 _triggeredToday.Clear();
                 _lastCheckedDate = now.Date;
-                Console.WriteLine($"[ScheduleManager] Date changed to {now:yyyy-MM-dd}, reset triggered list");
             }
 
             // 現在時刻を TimeSpan に変換（時:分:秒）
@@ -134,33 +125,26 @@ public class ScheduleManager : IDisposable
                 double diffSeconds = Math.Abs((currentTime - targetTime).TotalSeconds);
                 if (diffSeconds < 1.0)
                 {
-                    Console.WriteLine($"[ScheduleManager] ========== Schedule Triggered ==========");
-                    Console.WriteLine($"[ScheduleManager] Target time: {targetTime:hh\\:mm\\:ss}");
-                    Console.WriteLine($"[ScheduleManager] Current time: {currentTime:hh\\:mm\\:ss}");
-
                     // トリガー済みとしてマーク（同日中の再実行を防止）
                     _triggeredToday.Add(targetTime);
 
                     // MPV が既に起動中かチェック
                     if (_isMpvRunning())
                     {
-                        Console.WriteLine($"[ScheduleManager] MPV already running, skipping schedule trigger");
-                        Console.WriteLine($"[ScheduleManager] ========================================\n");
                         continue;
                     }
 
+                    Console.WriteLine($"[ScheduleManager] Schedule triggered: {targetTime:hh\\:mm\\:ss}");
+
                     // スケジュールトリガー実行
-                    Console.WriteLine($"[ScheduleManager] Executing scheduled action...");
                     try
                     {
                         _onScheduleTriggered();
-                        Console.WriteLine($"[ScheduleManager] Scheduled action completed");
                     }
                     catch (Exception ex)
                     {
                         Console.Error.WriteLine($"[ScheduleManager] Error executing scheduled action: {ex.Message}");
                     }
-                    Console.WriteLine($"[ScheduleManager] ========================================\n");
                 }
             }
         }

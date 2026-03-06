@@ -49,11 +49,6 @@ public class HttpServer : IDisposable
             IsRunning = true;
 
             Console.WriteLine($"[HttpServer] Started on {prefix}");
-            Console.WriteLine("[HttpServer] Listening for HTTP requests on:");
-            Console.WriteLine($"  - http://localhost:{_port}/api/toggle");
-            Console.WriteLine($"  - http://localhost:{_port}/api/quit");
-            Console.WriteLine($"  - http://localhost:{_port}/api/restart");
-            Console.WriteLine($"  - GET http://localhost:{_port}/api/status");
 
             // 別スレッドでリクエスト受信
             _listenerTask = Task.Run(() => ListenForRequests(_cancellationTokenSource.Token));
@@ -122,8 +117,6 @@ public class HttpServer : IDisposable
 
         try
         {
-            Console.WriteLine($"[HttpServer] {request.HttpMethod} {request.RawUrl}");
-
             // ルート解析
             string path = request.Url?.AbsolutePath ?? "/";
 
@@ -173,8 +166,6 @@ public class HttpServer : IDisposable
 
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
             response.OutputStream.Close();
-
-            Console.WriteLine($"[HttpServer] Response: {statusCode}");
         }
         catch (Exception ex)
         {

@@ -88,7 +88,7 @@ public class SetupManager
     public void RunInitialSetup()
     {
         Console.WriteLine("================================================");
-        Console.WriteLine("  Sync Play Auto Timer v2.5.0 - Initial Setup");
+        Console.WriteLine("  Sync Play Auto Timer v2.5.3 - Initial Setup");
         Console.WriteLine("================================================\n");
 
         // 管理者権限チェック

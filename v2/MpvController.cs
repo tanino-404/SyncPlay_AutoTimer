@@ -65,7 +65,6 @@ public class MpvController : IDisposable
                     if (!string.IsNullOrWhiteSpace(resolvedPath))
                     {
                         _videoFilePaths[i] = resolvedPath;
-                        Console.WriteLine($"[MpvController] Display {i} video path: {resolvedPath}");
                     }
                 }
             }
@@ -77,7 +76,6 @@ public class MpvController : IDisposable
             _mpvStartupWaitMs = 2000; // デフォルト値
         }
 
-        Console.WriteLine($"[MpvController] TopMost monitoring interval: {_topMostIntervalMs}ms");
     }
 
     /// <summary>
@@ -114,10 +112,6 @@ public class MpvController : IDisposable
             // IPC パイプ名（通常は mpvpipe で固定、複数インスタンスの場合はサフィックスを追加）
             string pipeName = displayIndex == 0 ? "mpvpipe" : $"mpvpipe{displayIndex}";
 
-            Console.WriteLine($"[MpvController] Starting MPV instance for display {displayIndex}...");
-            Console.WriteLine($"  Video: {videoPath}");
-            Console.WriteLine($"  IPC Pipe: {pipeName}");
-
             // MPV 起動コマンド（バックグラウンド起動）
             // --no-audio-display: 音声表示しない
             // --input-ipc-server=\\.\pipe\PIPE_NAME で IPC パイプ設定
@@ -144,8 +138,6 @@ public class MpvController : IDisposable
 
             // IPC パイプ接続待機
             System.Threading.Thread.Sleep(_mpvStartupWaitMs);
-
-            Console.WriteLine($"[MpvController] MPV instance started for display {displayIndex} (PID: {process.Id})");
 
             return true;
         }
@@ -184,9 +176,6 @@ public class MpvController : IDisposable
 
             string jsonString = JsonConvert.SerializeObject(jsonRequest) + "\n";
 
-            // デバッグ: 送信するJSON全体をログ出力
-            Console.WriteLine($"[MpvController] Sending JSON to display {displayIndex}: {jsonString.TrimEnd()}");
-
             // IPC パイプで送信
             using (var pipeClient = new NamedPipeClientStream(".", instance.PipeName, PipeDirection.InOut))
             {
@@ -194,9 +183,6 @@ public class MpvController : IDisposable
 
                 var writer = new StreamWriter(pipeClient) { AutoFlush = true };
                 writer.WriteLine(jsonString);
-
-                // MPV IPC は非同期で送信のみで十分（レスポンス受信は必須ではない）
-                Console.WriteLine($"[MpvController] Command sent successfully to display {displayIndex}");
 
                 return true;
             }
@@ -220,8 +206,6 @@ public class MpvController : IDisposable
     /// </summary>
     public void TogglePlayPause()
     {
-        Console.WriteLine("[MpvController] ========== TogglePlayPause (Global) ==========");
-
         var allInstances = _instances.Values.ToList();
 
         // インスタンスが存在しない、または全て停止している場合 → 全て起動 + 再生
@@ -360,7 +344,6 @@ public class MpvController : IDisposable
             Console.WriteLine($"[MpvController] Mixed state resolved: all instances {(_isGloballyPlaying ? "playing" : "paused")}.");
         }
 
-        Console.WriteLine("[MpvController] ================================================\n");
     }
 
     /// <summary>
@@ -392,26 +375,20 @@ public class MpvController : IDisposable
         // 既にタイマーが動作中の場合は何もしない（重複防止）
         if (_isTopMostTimerRunning)
         {
-            Console.WriteLine("[MpvController] TopMost monitoring already running. Skipping.");
             return;
         }
 
         // MPVインスタンスが起動していない場合は起動しない
         if (!_instances.Values.Any(i => i.IsRunning))
         {
-            Console.WriteLine("[MpvController] No running MPV instances. TopMost monitoring not started.");
             return;
         }
-
-        Console.WriteLine($"[MpvController] Starting TopMost monitoring (interval: {_topMostIntervalMs}ms)...");
 
         _topMostTimer = new System.Timers.Timer(_topMostIntervalMs);
         _topMostTimer.Elapsed += OnTopMostTimerElapsed;
         _topMostTimer.AutoReset = true;
         _topMostTimer.Start();
         _isTopMostTimerRunning = true;
-
-        Console.WriteLine("[MpvController] TopMost monitoring started.");
     }
 
     /// <summary>
@@ -421,13 +398,11 @@ public class MpvController : IDisposable
     {
         if (_topMostTimer != null)
         {
-            Console.WriteLine("[MpvController] Stopping TopMost monitoring...");
             _topMostTimer.Stop();
             _topMostTimer.Elapsed -= OnTopMostTimerElapsed;
             _topMostTimer.Dispose();
             _topMostTimer = null;
             _isTopMostTimerRunning = false;
-            Console.WriteLine("[MpvController] TopMost monitoring stopped.");
         }
     }
 
@@ -531,8 +506,6 @@ public class MpvController : IDisposable
         {
             if (instance.IsRunning)
             {
-                Console.WriteLine($"[MpvController] Stopping instance for display {displayIndex}");
-
                 // まずJSON-RPC quitコマンドを試行（クリーンな終了）
                 bool quitSuccess = SendCommand(displayIndex, "quit");
 
@@ -541,11 +514,7 @@ public class MpvController : IDisposable
                     // quitコマンド送信成功、プロセス終了を待機（最大2秒）
                     bool exited = instance.Process!.WaitForExit(2000);
 
-                    if (exited)
-                    {
-                        Console.WriteLine($"[MpvController] Instance for display {displayIndex} exited cleanly via quit command");
-                    }
-                    else
+                    if (!exited)
                     {
                         // タイムアウト: プロセスキルにフォールバック
                         Console.WriteLine($"[MpvController] Quit command timed out for display {displayIndex}, forcing termination");

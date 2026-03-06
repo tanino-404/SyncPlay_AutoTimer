@@ -145,7 +145,6 @@ public class ConfigManager
             }
 
             Console.WriteLine($"[ConfigManager] ✅ Config loaded: {_configPath}");
-            PrintLoadedConfig();
             return true;
         }
         catch (Exception ex)
@@ -388,8 +387,8 @@ Display1VideoPath=..\Video\display1.mp4
     /// </summary>
     public static void GenerateTemplate(string outputPath = "config.ini")
     {
-        string template = @"# Sync Play Auto Timer v2.5.0 Configuration File
-# Last updated: 2026-03-05
+        string template = @"# Sync Play Auto Timer v2.5.3 Configuration File
+# Last updated: 2026-03-06
 
 [Mode]
 ServerMode=true

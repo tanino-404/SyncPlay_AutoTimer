@@ -123,7 +123,6 @@ public class ProcessManager : IDisposable
             SetJobLimits(_jobHandle);
 
             IsInitialized = true;
-            Console.WriteLine($"[ProcessManager] Initialized with job: {jobName}");
         }
         catch (Exception ex)
         {
@@ -162,7 +161,6 @@ public class ProcessManager : IDisposable
                 throw new Exception($"SetInformationJobObject failed with error: {error}");
             }
 
-            Console.WriteLine("[ProcessManager] Job limit set: Kill child processes on job close");
         }
         finally
         {
@@ -202,18 +200,12 @@ public class ProcessManager : IDisposable
             var process = Process.Start(startInfo)
                 ?? throw new Exception($"Failed to start process: {exePath}");
 
-            Console.WriteLine($"[ProcessManager] Process started: {exePath} (PID: {process.Id})");
-
             // ジョブに割り当て
             if (!AssignProcessToJobObject(_jobHandle, process.Handle))
             {
                 int error = Marshal.GetLastWin32Error();
                 Console.Error.WriteLine($"[ProcessManager] Warning: Failed to assign process to job (Error: {error})");
                 // ここではエラーをスローしない（プロセスは起動している）
-            }
-            else
-            {
-                Console.WriteLine($"[ProcessManager] Process assigned to job (PID: {process.Id})");
             }
 
             // 管理リストに追加

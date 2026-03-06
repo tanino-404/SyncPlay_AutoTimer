@@ -44,24 +44,9 @@ public class NetworkSyncManager : IDisposable
         // ServerMode=true かつ ClientIPList が存在する場合のみ有効化
         _isEnabled = _isServerMode && _clientIPs.Any();
 
-        if (_isServerMode)
+        if (_isEnabled)
         {
-            if (_isEnabled)
-            {
-                Console.WriteLine($"[NetworkSyncManager] ServerMode enabled. Broadcasting to {_clientIPs.Count} client(s):");
-                foreach (var ip in _clientIPs)
-                {
-                    Console.WriteLine($"  - {ip}:{_httpPort}");
-                }
-            }
-            else
-            {
-                Console.WriteLine("[NetworkSyncManager] ServerMode enabled, but no client IPs configured.");
-            }
-        }
-        else
-        {
-            Console.WriteLine("[NetworkSyncManager] ClientMode. Network sync disabled.");
+            Console.WriteLine($"[NetworkSyncManager] Broadcast targets: {string.Join(", ", _clientIPs.Select(ip => $"{ip}:{_httpPort}"))}");
         }
     }
 
@@ -78,8 +63,6 @@ public class NetworkSyncManager : IDisposable
             // ServerMode=false またはクライアントが設定されていない場合は何もしない
             return;
         }
-
-        Console.WriteLine($"[NetworkSyncManager] Broadcasting {endpoint} command...");
 
         // 送信データを準備
         var requestData = new Dictionary<string, object>
@@ -124,11 +107,7 @@ public class NetworkSyncManager : IDisposable
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync(url, content);
 
-            if (response.IsSuccessStatusCode)
-            {
-                Console.WriteLine($"[NetworkSyncManager] ✓ {ip} → {endpoint} (HTTP {(int)response.StatusCode})");
-            }
-            else
+            if (!response.IsSuccessStatusCode)
             {
                 Console.WriteLine($"[NetworkSyncManager] ✗ {ip} → {endpoint} (HTTP {(int)response.StatusCode})");
             }

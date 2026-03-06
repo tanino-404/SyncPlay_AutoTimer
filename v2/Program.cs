@@ -1,15 +1,12 @@
 ﻿using v2;
 
 Console.WriteLine("================================================");
-Console.WriteLine("  Sync Play Auto Timer v2.5.2");
-Console.WriteLine("  Keyboard Hook + HTTP Server + Network Sync");
-Console.WriteLine("  + Schedule + Loop Mode");
+Console.WriteLine("  Sync Play Auto Timer v2.5.3");
 Console.WriteLine("================================================\n");
 
 // 設定ファイル読み込み（ConfigManager を先に生成してポート番号を確定）
 // Windows Documents フォルダ内の固定パスを使用
 var configManager = new ConfigManager();
-Console.WriteLine($"[Program] Config path: {configManager.ConfigPath}\n");
 if (!configManager.LoadConfig())
 {
     Console.WriteLine("[Program] ⚠️  Warning: Config loading failed. Using hardcoded defaults.\n");
@@ -55,9 +52,6 @@ ScheduleManager? scheduleManager = null;
 // HTTP サーバーのイベントハンドラ設定（Phase 3.10: ネットワーク同期統合）
 httpServer.OnToggle += async (sender, e) =>
 {
-    Console.WriteLine($"\n[Program] ======== Toggle Event ========");
-    Console.WriteLine($"[Program] HTTP Toggle event received from {e.Path}");
-
     try
     {
         // ローカルMPV制御と別機ブロードキャストを並列実行（遅延削減）
@@ -71,15 +65,10 @@ httpServer.OnToggle += async (sender, e) =>
     {
         Console.Error.WriteLine($"[Program] Error handling Toggle event: {ex.Message}");
     }
-
-    Console.WriteLine($"[Program] ===================================\n");
 };
 
 httpServer.OnQuit += async (sender, e) =>
 {
-    Console.WriteLine($"\n[Program] ======== Quit Event ========");
-    Console.WriteLine($"[Program] HTTP Quit event received from {e.Path}");
-
     try
     {
         // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
@@ -93,16 +82,10 @@ httpServer.OnQuit += async (sender, e) =>
     {
         Console.Error.WriteLine($"[Program] Error handling Quit event: {ex.Message}");
     }
-
-    Console.WriteLine($"[Program] Quit command processed.");
-    Console.WriteLine($"[Program] ===================================\n");
 };
 
 httpServer.OnRestart += async (sender, e) =>
 {
-    Console.WriteLine($"\n[Program] ======== Restart Event ========");
-    Console.WriteLine($"[Program] HTTP Restart event received from {e.Path}");
-
     try
     {
         // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
@@ -116,20 +99,11 @@ httpServer.OnRestart += async (sender, e) =>
     {
         Console.Error.WriteLine($"[Program] Error handling Restart event: {ex.Message}");
     }
-
-    // TODO: 再起動機能は Phase 3.11 で実装予定
-    Console.WriteLine($"[Program] ⚠️  Restart command processed (Stop only - Restart feature coming in Phase 3.11).");
-    Console.WriteLine($"[Program] ===================================\n");
 };
 
 httpServer.OnStatus += (sender, e) =>
 {
-    Console.WriteLine($"\n[Program] ======== Status Check ========");
-    Console.WriteLine($"[Program] HTTP Status check from {e.Path}");
-
     mpvController.PrintStatus();
-
-    Console.WriteLine($"[Program] ===================================\n");
 };
 
 // HTTP サーバー起動（管理者権限が必要）
@@ -148,16 +122,11 @@ catch (System.Net.HttpListenerException ex) when (ex.ErrorCode == 5)
 // Phase 5: ループモード（動画終了後にアプリケーション側で自動再起動）
 if (configManager.LoopMode)
 {
-    Console.WriteLine("[Program] LoopMode enabled. Videos will restart automatically after ending.");
     mpvController.OnAllInstancesExited += () =>
     {
-        Console.WriteLine("[Program] ======== Loop Restart ========");
-
         var localTask = Task.Run(() => mpvController.TogglePlayPause());
         var broadcastTask = networkSyncManager.BroadcastToggleAsync();
         Task.WhenAll(localTask, broadcastTask).Wait();
-
-        Console.WriteLine("[Program] ================================\n");
     };
 }
 
@@ -167,16 +136,12 @@ scheduleManager = new ScheduleManager(
     configManager,
     onScheduleTriggered: () =>
     {
-        Console.WriteLine("[Program] ======== Schedule Triggered ========");
-
         // ローカル MPV 制御と別機ブロードキャストを並列実行（/api/toggle と同じ処理）
         var localTask = Task.Run(() => mpvController.TogglePlayPause());
         var broadcastTask = networkSyncManager.BroadcastToggleAsync();
 
         // 両方の完了を待機
         Task.WhenAll(localTask, broadcastTask).Wait();
-
-        Console.WriteLine("[Program] =========================================\n");
     },
     isMpvRunning: mpvController.HasRunningInstances
 );
@@ -202,8 +167,6 @@ var monitoringTask = Task.Run(async () =>
         // キーボードイベントキューを定期的にチェック
         if (keyboardHook.EventQueue.TryDequeue(out var keyEvent))
         {
-            Console.WriteLine($"[Program] Keyboard event queued: {keyEvent}");
-
             // HTTP POST/GET を送信
             try
             {
@@ -219,8 +182,6 @@ var monitoringTask = Task.Run(async () =>
                 {
                     response = await httpClient.PostAsync(endpoint, null);
                 }
-
-                Console.WriteLine($"[Program] HTTP {(keyEvent.Action == "status" ? "GET" : "POST")} sent to {endpoint}: {response.StatusCode}");
             }
             catch (Exception ex)
             {
@@ -275,5 +236,4 @@ try
 }
 catch (OperationCanceledException)
 {
-    Console.WriteLine("[Program] Monitoring task cancelled.");
 }

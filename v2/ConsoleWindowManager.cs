@@ -43,11 +43,7 @@ public class ConsoleWindowManager
         try
         {
             bool result = ShowWindow(_consoleHandle, SW_MINIMIZE);
-            if (result)
-            {
-                Console.WriteLine("[ConsoleWindowManager] Console window minimized successfully.");
-            }
-            else
+            if (!result)
             {
                 Console.Error.WriteLine("[ConsoleWindowManager] Failed to minimize console window.");
             }
