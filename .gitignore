@@ -1,1 +1,9 @@
 *.mp4
+/Develop_Document
+/.backup
+/.claude
+/App
+nul
+v2/bin/
+v2/obj/
+Setting/config.ini
