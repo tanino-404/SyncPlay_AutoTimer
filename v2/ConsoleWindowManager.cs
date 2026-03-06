@@ -4,7 +4,7 @@ namespace v2;
 
 /// <summary>
 /// コンソールウィンドウの管理クラス
-/// ウィンドウの最小化・非表示を提供
+/// ウィンドウの最小化を提供
 /// </summary>
 public class ConsoleWindowManager
 {
@@ -17,7 +17,6 @@ public class ConsoleWindowManager
 
     // 定数
     private const int SW_MINIMIZE = 6;
-    private const int SW_HIDE = 0;
 
     private IntPtr _consoleHandle;
 
@@ -60,37 +59,4 @@ public class ConsoleWindowManager
             return false;
         }
     }
-
-    /// <summary>
-    /// コンソールウィンドウを完全に非表示（Phase 4 以降用）
-    /// </summary>
-    /// <returns>成功した場合 true</returns>
-    public bool HideWindow()
-    {
-        if (_consoleHandle == IntPtr.Zero)
-        {
-            Console.Error.WriteLine("[ConsoleWindowManager] Failed to get console window handle.");
-            return false;
-        }
-
-        try
-        {
-            bool result = ShowWindow(_consoleHandle, SW_HIDE);
-            if (result)
-            {
-                Console.WriteLine("[ConsoleWindowManager] Console window hidden successfully.");
-            }
-            else
-            {
-                Console.Error.WriteLine("[ConsoleWindowManager] Failed to hide console window.");
-            }
-            return result;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[ConsoleWindowManager] Error hiding window: {ex.Message}");
-            return false;
-        }
-    }
-
 }

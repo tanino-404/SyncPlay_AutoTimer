@@ -34,7 +34,7 @@ public class ConfigManager
     /// <summary>
     /// HTTPサーバーポート番号を取得
     /// </summary>
-    public int HttpServerPort => int.Parse(GetValue("Network", "HttpServerPort", "8080") ?? "8080");
+    public int HttpServerPort => GetInt("Network", "HttpServerPort", 8080);
 
     /// <summary>
     /// 起動時の最小化モードを取得
@@ -52,6 +52,11 @@ public class ConfigManager
     public int TopMostIntervalMs => GetInt("Player", "TopMostIntervalMs", 100);
 
     /// <summary>
+    /// 制御するディスプレイ数を取得
+    /// </summary>
+    public int DisplayCount => GetInt("Player", "DisplayCount", 2);
+
+    /// <summary>
     /// スケジュールモードを取得（ServerMode=true の場合のみ有効）
     /// </summary>
     public bool ScheduleMode => GetBool("Mode", "ScheduleMode", false);
@@ -60,6 +65,11 @@ public class ConfigManager
     /// ループモードを取得（動画終了後にアプリケーション側で自動再起動）
     /// </summary>
     public bool LoopMode => GetBool("Mode", "LoopMode", false);
+
+    /// <summary>
+    /// MPV 起動後 IPC 接続待機時間（ミリ秒）を取得
+    /// </summary>
+    public int MpvStartupWaitMs => GetInt("Player", "MpvStartupWaitMs", 2000);
 
     /// <summary>
     /// スケジュール時刻リストを取得（HH:MM または HH:MM:SS 形式）
@@ -243,23 +253,6 @@ public class ConfigManager
     }
 
     /// <summary>
-    /// カンマ区切りの値を配列として取得
-    /// </summary>
-    public string[] GetArray(string section, string key, string[]? defaultValue = null)
-    {
-        string? value = GetValue(section, key);
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return defaultValue ?? Array.Empty<string>();
-        }
-
-        return value.Split(',')
-            .Select(s => s.Trim())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToArray();
-    }
-
-    /// <summary>
     /// TargetTimes 文字列を TimeSpan 配列にパース
     /// 対応形式: HH:MM または HH:MM:SS（カンマ区切り）
     /// </summary>
@@ -403,19 +396,19 @@ ServerMode=true
 ScheduleMode=true
 LoopMode=true
 MinimizeStartMode=true
-DebugMode=false
 
 [Player]
 MpvPath=C:\Program Files\mpv\mpv.exe
+DisplayCount=2
 Display0VideoPath=..\Video\display0.mp4
 Display1VideoPath=..\Video\display1.mp4
 TopMostIntervalMs=100
+MpvStartupWaitMs=2000
 
 [Network]
 ClientIPList=192.168.1.1
 HttpServerPort=8080
-CommandTimeout=500
-CommandRetry=2
+CommandTimeout=2000
 
 [Keyboard]
 KeyToggle=alt+ctrl+shift+p

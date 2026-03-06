@@ -12,9 +12,12 @@ public class SetupManager
     private const string SetupCompletedFlagFile = ".setup_completed";
     private readonly string _appDataFolder;
     private readonly string _setupFlagPath;
+    private readonly ConfigManager _configManager;
 
-    public SetupManager()
+    public SetupManager(ConfigManager configManager)
     {
+        _configManager = configManager;
+
         // %AppData%\SyncPlay_AutoTimer\ に初回セットアップ完了フラグを配置
         _appDataFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -112,8 +115,9 @@ public class SetupManager
         // Step 1: HTTP ACL設定
         if (isAdmin)
         {
-            Console.WriteLine("[Step 1/3] Setting up HTTP ACL for port 8080...");
-            SetupHttpAcl(8080);
+            int port = _configManager.HttpServerPort;
+            Console.WriteLine($"[Step 1/3] Setting up HTTP ACL for port {port}...");
+            SetupHttpAcl(port);
         }
         else
         {
@@ -125,8 +129,9 @@ public class SetupManager
         // Step 2: ファイアウォール設定
         if (isAdmin)
         {
+            int port = _configManager.HttpServerPort;
             Console.WriteLine("[Step 2/3] Setting up Windows Firewall...");
-            SetupFirewall(8080);
+            SetupFirewall(port);
         }
         else
         {

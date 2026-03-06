@@ -1,26 +1,26 @@
 ﻿using v2;
 
 Console.WriteLine("================================================");
-Console.WriteLine("  Sync Play Auto Timer v2.5.0");
+Console.WriteLine("  Sync Play Auto Timer v2.5.2");
 Console.WriteLine("  Keyboard Hook + HTTP Server + Network Sync");
 Console.WriteLine("  + Schedule + Loop Mode");
 Console.WriteLine("================================================\n");
 
-// 初回セットアップチェック
-var setupManager = new SetupManager();
-if (!setupManager.IsSetupCompleted())
-{
-    Console.WriteLine("[Program] First-time setup required.\n");
-    setupManager.RunInitialSetup();
-}
-
-// 設定ファイル読み込み（Phase 3）
+// 設定ファイル読み込み（ConfigManager を先に生成してポート番号を確定）
 // Windows Documents フォルダ内の固定パスを使用
 var configManager = new ConfigManager();
 Console.WriteLine($"[Program] Config path: {configManager.ConfigPath}\n");
 if (!configManager.LoadConfig())
 {
     Console.WriteLine("[Program] ⚠️  Warning: Config loading failed. Using hardcoded defaults.\n");
+}
+
+// 初回セットアップチェック（ConfigManager 経由でポート番号を渡す）
+var setupManager = new SetupManager(configManager);
+if (!setupManager.IsSetupCompleted())
+{
+    Console.WriteLine("[Program] First-time setup required.\n");
+    setupManager.RunInitialSetup();
 }
 
 // Phase 3.7: コンソールウィンドウの自動最小化
@@ -58,12 +58,19 @@ httpServer.OnToggle += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Toggle Event ========");
     Console.WriteLine($"[Program] HTTP Toggle event received from {e.Path}");
 
-    // ローカルMPV制御と別機ブロードキャストを並列実行（遅延削減）
-    var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
-    var broadcastTask = networkSyncManager.BroadcastToggleAsync();
+    try
+    {
+        // ローカルMPV制御と別機ブロードキャストを並列実行（遅延削減）
+        var localTask = Task.Run(() => mpvController.TogglePlayPause());
+        var broadcastTask = networkSyncManager.BroadcastToggleAsync();
 
-    // 両方の完了を待機
-    await Task.WhenAll(localTask, broadcastTask);
+        // 両方の完了を待機
+        await Task.WhenAll(localTask, broadcastTask);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Program] Error handling Toggle event: {ex.Message}");
+    }
 
     Console.WriteLine($"[Program] ===================================\n");
 };
@@ -73,12 +80,19 @@ httpServer.OnQuit += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Quit Event ========");
     Console.WriteLine($"[Program] HTTP Quit event received from {e.Path}");
 
-    // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
-    var localTask = Task.Run(() => mpvController.StopAll());
-    var broadcastTask = networkSyncManager.BroadcastQuitAsync();
+    try
+    {
+        // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
+        var localTask = Task.Run(() => mpvController.StopAll());
+        var broadcastTask = networkSyncManager.BroadcastQuitAsync();
 
-    // 両方の完了を待機
-    await Task.WhenAll(localTask, broadcastTask);
+        // 両方の完了を待機
+        await Task.WhenAll(localTask, broadcastTask);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Program] Error handling Quit event: {ex.Message}");
+    }
 
     Console.WriteLine($"[Program] Quit command processed.");
     Console.WriteLine($"[Program] ===================================\n");
@@ -89,12 +103,19 @@ httpServer.OnRestart += async (sender, e) =>
     Console.WriteLine($"\n[Program] ======== Restart Event ========");
     Console.WriteLine($"[Program] HTTP Restart event received from {e.Path}");
 
-    // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
-    var localTask = Task.Run(() => mpvController.StopAll());
-    var broadcastTask = networkSyncManager.BroadcastRestartAsync();
+    try
+    {
+        // ローカルMPV停止と別機ブロードキャストを並列実行（遅延削減）
+        var localTask = Task.Run(() => mpvController.StopAll());
+        var broadcastTask = networkSyncManager.BroadcastRestartAsync();
 
-    // 両方の完了を待機
-    await Task.WhenAll(localTask, broadcastTask);
+        // 両方の完了を待機
+        await Task.WhenAll(localTask, broadcastTask);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Program] Error handling Restart event: {ex.Message}");
+    }
 
     // TODO: 再起動機能は Phase 3.11 で実装予定
     Console.WriteLine($"[Program] ⚠️  Restart command processed (Stop only - Restart feature coming in Phase 3.11).");
@@ -132,7 +153,7 @@ if (configManager.LoopMode)
     {
         Console.WriteLine("[Program] ======== Loop Restart ========");
 
-        var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
+        var localTask = Task.Run(() => mpvController.TogglePlayPause());
         var broadcastTask = networkSyncManager.BroadcastToggleAsync();
         Task.WhenAll(localTask, broadcastTask).Wait();
 
@@ -149,7 +170,7 @@ scheduleManager = new ScheduleManager(
         Console.WriteLine("[Program] ======== Schedule Triggered ========");
 
         // ローカル MPV 制御と別機ブロードキャストを並列実行（/api/toggle と同じ処理）
-        var localTask = Task.Run(() => mpvController.TogglePlayPauseAll());
+        var localTask = Task.Run(() => mpvController.TogglePlayPause());
         var broadcastTask = networkSyncManager.BroadcastToggleAsync();
 
         // 両方の完了を待機
@@ -157,7 +178,7 @@ scheduleManager = new ScheduleManager(
 
         Console.WriteLine("[Program] =========================================\n");
     },
-    isMpvRunning: () => mpvController.HasRunningInstances()
+    isMpvRunning: mpvController.HasRunningInstances
 );
 scheduleManager.Start();
 
@@ -172,10 +193,11 @@ var messageLoopTask = Task.Run(() =>
 });
 
 // キーボード入力イベント監視タスク
+var monitoringCts = new CancellationTokenSource();
 var monitoringTask = Task.Run(async () =>
 {
     using var httpClient = new HttpClient();
-    while (true)
+    while (!monitoringCts.Token.IsCancellationRequested)
     {
         // キーボードイベントキューを定期的にチェック
         if (keyboardHook.EventQueue.TryDequeue(out var keyEvent))
@@ -206,14 +228,18 @@ var monitoringTask = Task.Run(async () =>
             }
         }
 
-        await Task.Delay(50);
+        await Task.Delay(50, monitoringCts.Token);
     }
-});
+}, monitoringCts.Token);
 
-// Ctrl+C でアプリケーション終了
-AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+// シャットダウン処理（共通）
+void Shutdown()
 {
-    Console.WriteLine("\n[Program] Shutting down...");
+    if (!monitoringCts.IsCancellationRequested)
+    {
+        monitoringCts.Cancel();
+        monitoringCts.Dispose();
+    }
     scheduleManager?.Stop();
     mpvController.StopAll();
     keyboardHook.Shutdown();
@@ -225,22 +251,20 @@ AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
     processManager.Shutdown();
     processManager.Dispose();
     Console.WriteLine("[Program] All resources released. Goodbye!");
+}
+
+// Ctrl+C でアプリケーション終了
+AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+{
+    Console.WriteLine("\n[Program] Shutting down...");
+    Shutdown();
 };
 
 Console.CancelKeyPress += (sender, e) =>
 {
     e.Cancel = true;
     Console.WriteLine("\n[Program] Ctrl+C detected. Shutting down...");
-    scheduleManager?.Stop();
-    mpvController.StopAll();
-    keyboardHook.Shutdown();
-    httpServer.Stop();
-    httpServer.Dispose();
-    keyboardHook.Dispose();
-    networkSyncManager.Dispose();
-    scheduleManager?.Dispose();
-    processManager.Shutdown();
-    processManager.Dispose();
+    Shutdown();
     Environment.Exit(0);
 };
 

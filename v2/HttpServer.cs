@@ -79,25 +79,17 @@ public class HttpServer : IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                HttpListenerContext? context;
+                HttpListenerContext context;
 
                 try
                 {
-                    // リクエスト受信（タイムアウト設定）
-                    context = await Task.Run(() =>
-                    {
-                        try
-                        {
-                            return _listener.GetContext();
-                        }
-                        catch (ObjectDisposedException)
-                        {
-                            return null;
-                        }
-                    }, cancellationToken);
-
-                    if (context == null)
-                        break;
+                    // リクエスト受信（真の非同期: GetContextAsync使用）
+                    context = await _listener.GetContextAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // _listener.Stop() 呼び出し時に発生 → ループ終了
+                    break;
                 }
                 catch (OperationCanceledException)
                 {
@@ -136,49 +128,21 @@ public class HttpServer : IDisposable
             string path = request.Url?.AbsolutePath ?? "/";
 
             // JSON レスポンス構造
-            var jsonResponse = new { status = "success", action = "", timestamp = DateTime.UtcNow };
             string responseJson = "";
             int statusCode = 200;
 
             switch (path.ToLower())
             {
                 case "/api/toggle":
-                    if (request.HttpMethod == "POST")
-                    {
-                        OnToggle?.Invoke(this, new HttpEventArgs { Path = path });
-                        responseJson = JsonConvert.SerializeObject(new { status = "success", action = "toggle", timestamp = DateTime.UtcNow });
-                    }
-                    else
-                    {
-                        statusCode = 405;
-                        responseJson = JsonConvert.SerializeObject(new { status = "error", message = "Method not allowed. Use POST." });
-                    }
+                    (statusCode, responseJson) = HandlePostEndpoint(request, path, "toggle", OnToggle);
                     break;
 
                 case "/api/quit":
-                    if (request.HttpMethod == "POST")
-                    {
-                        OnQuit?.Invoke(this, new HttpEventArgs { Path = path });
-                        responseJson = JsonConvert.SerializeObject(new { status = "success", action = "quit", timestamp = DateTime.UtcNow });
-                    }
-                    else
-                    {
-                        statusCode = 405;
-                        responseJson = JsonConvert.SerializeObject(new { status = "error", message = "Method not allowed. Use POST." });
-                    }
+                    (statusCode, responseJson) = HandlePostEndpoint(request, path, "quit", OnQuit);
                     break;
 
                 case "/api/restart":
-                    if (request.HttpMethod == "POST")
-                    {
-                        OnRestart?.Invoke(this, new HttpEventArgs { Path = path });
-                        responseJson = JsonConvert.SerializeObject(new { status = "success", action = "restart", timestamp = DateTime.UtcNow });
-                    }
-                    else
-                    {
-                        statusCode = 405;
-                        responseJson = JsonConvert.SerializeObject(new { status = "error", message = "Method not allowed. Use POST." });
-                    }
+                    (statusCode, responseJson) = HandlePostEndpoint(request, path, "restart", OnRestart);
                     break;
 
                 case "/api/status":
@@ -221,6 +185,23 @@ public class HttpServer : IDisposable
                 response.Close();
             }
             catch { }
+        }
+    }
+
+    /// <summary>
+    /// POST エンドポイントの共通処理（HTTPメソッドチェック → イベント発火 → レスポンス生成）
+    /// </summary>
+    private (int statusCode, string responseJson) HandlePostEndpoint(
+        HttpListenerRequest request, string path, string action, EventHandler<HttpEventArgs>? eventHandler)
+    {
+        if (request.HttpMethod == "POST")
+        {
+            eventHandler?.Invoke(this, new HttpEventArgs { Path = path });
+            return (200, JsonConvert.SerializeObject(new { status = "success", action, timestamp = DateTime.UtcNow }));
+        }
+        else
+        {
+            return (405, JsonConvert.SerializeObject(new { status = "error", message = "Method not allowed. Use POST." }));
         }
     }
 

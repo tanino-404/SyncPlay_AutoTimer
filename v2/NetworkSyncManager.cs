@@ -18,13 +18,14 @@ public class NetworkSyncManager : IDisposable
 
     public NetworkSyncManager(ConfigManager configManager)
     {
-        _httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(2) // タイムアウト: 2秒
-        };
-
         // config.ini から設定を読み込み
         _httpPort = configManager.HttpServerPort;
+
+        int commandTimeoutMs = configManager.GetInt("Network", "CommandTimeout", 2000);
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMilliseconds(commandTimeoutMs)
+        };
         _isServerMode = configManager.ServerMode;
 
         // ClientIPList を読み込み（カンマ区切り）
@@ -77,6 +78,8 @@ public class NetworkSyncManager : IDisposable
             // ServerMode=false またはクライアントが設定されていない場合は何もしない
             return;
         }
+
+        Console.WriteLine($"[NetworkSyncManager] Broadcasting {endpoint} command...");
 
         // 送信データを準備
         var requestData = new Dictionary<string, object>
@@ -150,38 +153,17 @@ public class NetworkSyncManager : IDisposable
     /// <summary>
     /// toggle コマンドをブロードキャスト（ServerMode=true の場合のみ）
     /// </summary>
-    public async Task BroadcastToggleAsync()
-    {
-        if (_isEnabled)
-        {
-            Console.WriteLine("[NetworkSyncManager] Broadcasting toggle command...");
-        }
-        await BroadcastCommandAsync("/api/toggle");
-    }
+    public async Task BroadcastToggleAsync() => await BroadcastCommandAsync("/api/toggle");
 
     /// <summary>
     /// quit コマンドをブロードキャスト（ServerMode=true の場合のみ）
     /// </summary>
-    public async Task BroadcastQuitAsync()
-    {
-        if (_isEnabled)
-        {
-            Console.WriteLine("[NetworkSyncManager] Broadcasting quit command...");
-        }
-        await BroadcastCommandAsync("/api/quit");
-    }
+    public async Task BroadcastQuitAsync() => await BroadcastCommandAsync("/api/quit");
 
     /// <summary>
     /// restart コマンドをブロードキャスト（ServerMode=true の場合のみ）
     /// </summary>
-    public async Task BroadcastRestartAsync()
-    {
-        if (_isEnabled)
-        {
-            Console.WriteLine("[NetworkSyncManager] Broadcasting restart command...");
-        }
-        await BroadcastCommandAsync("/api/restart");
-    }
+    public async Task BroadcastRestartAsync() => await BroadcastCommandAsync("/api/restart");
 
     public void Dispose()
     {

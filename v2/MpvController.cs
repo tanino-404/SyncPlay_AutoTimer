@@ -40,6 +40,7 @@ public class MpvController : IDisposable
     // Phase 3.11.1: 最前面化タイマー
     private System.Timers.Timer? _topMostTimer;
     private readonly int _topMostIntervalMs;
+    private readonly int _mpvStartupWaitMs;
     private bool _isTopMostTimerRunning = false;
 
     public MpvController(ProcessManager processManager, ConfigManager? configManager = null)
@@ -51,9 +52,10 @@ public class MpvController : IDisposable
         {
             _mpvExePath = configManager.GetValue("Player", "MpvPath", DefaultMpvExePath) ?? DefaultMpvExePath;
             _topMostIntervalMs = configManager.TopMostIntervalMs;
+            _mpvStartupWaitMs = configManager.MpvStartupWaitMs;
 
-            // 各ディスプレイの動画パスを読み込み（2ディスプレイ固定）
-            for (int i = 0; i < 2; i++)
+            // 各ディスプレイの動画パスを読み込み（DisplayCount に基づく）
+            for (int i = 0; i < configManager.DisplayCount; i++)
             {
                 string? videoPath = configManager.GetValue("Player", $"Display{i}VideoPath");
                 if (!string.IsNullOrWhiteSpace(videoPath))
@@ -72,6 +74,7 @@ public class MpvController : IDisposable
         {
             _mpvExePath = DefaultMpvExePath;
             _topMostIntervalMs = 100; // デフォルト値
+            _mpvStartupWaitMs = 2000; // デフォルト値
         }
 
         Console.WriteLine($"[MpvController] TopMost monitoring interval: {_topMostIntervalMs}ms");
@@ -139,8 +142,8 @@ public class MpvController : IDisposable
 
             _instances[displayIndex] = instance;
 
-            // IPC パイプ接続待機（2秒）
-            System.Threading.Thread.Sleep(2000);
+            // IPC パイプ接続待機
+            System.Threading.Thread.Sleep(_mpvStartupWaitMs);
 
             Console.WriteLine($"[MpvController] MPV instance started for display {displayIndex} (PID: {process.Id})");
 
@@ -211,90 +214,13 @@ public class MpvController : IDisposable
     }
 
     /// <summary>
-    /// 再生/一時停止トグル（インスタンスがない場合は自動起動）
-    /// 再生時は全画面、停止時はバックグラウンドに設定
-    /// </summary>
-    public bool TogglePlayPause(int displayIndex)
-    {
-        // インスタンスがない場合は自動起動
-        if (!_instances.ContainsKey(displayIndex) || !_instances[displayIndex].IsRunning)
-        {
-            Console.WriteLine($"[MpvController] Instance for display {displayIndex} not found. Auto-starting...");
-
-            if (!_videoFilePaths.TryGetValue(displayIndex, out string? videoPath))
-            {
-                Console.Error.WriteLine($"[MpvController] Display {displayIndex}: Video file path is not configured in config.ini.");
-                return false;
-            }
-
-            if (!File.Exists(videoPath))
-            {
-                Console.Error.WriteLine($"[MpvController] Display {displayIndex}: Video file not found: {videoPath}");
-                return false;
-            }
-
-            if (!StartInstance(displayIndex, videoPath))
-            {
-                Console.Error.WriteLine($"[MpvController] Failed to auto-start instance for display {displayIndex}");
-                return false;
-            }
-
-            // インスタンス起動後、初期状態は自動的に再生状態に設定
-            var newInstance = _instances[displayIndex];
-            newInstance.IsPlaying = true;
-
-            // 全画面に設定
-            Console.WriteLine($"[MpvController] Setting display {displayIndex} to fullscreen...");
-            SendCommand(displayIndex, "set_property", "fullscreen", true);
-
-            return true;
-        }
-
-        var instance = _instances[displayIndex];
-
-        // 再生/停止の次の状態を決定
-        bool willPlay = !instance.IsPlaying;
-
-        // 再生/停止コマンド（pauseプロパティを直接操作）
-        if (willPlay)
-        {
-            Console.WriteLine($"[MpvController] Playing display {displayIndex}...");
-            if (!SendCommand(displayIndex, "set_property", "pause", false))
-            {
-                return false;
-            }
-
-            // 再生時は全画面に設定
-            Console.WriteLine($"[MpvController] Setting display {displayIndex} to fullscreen...");
-            SendCommand(displayIndex, "set_property", "fullscreen", true);
-        }
-        else
-        {
-            Console.WriteLine($"[MpvController] Pausing display {displayIndex}...");
-            if (!SendCommand(displayIndex, "set_property", "pause", true))
-            {
-                return false;
-            }
-
-            // 停止時はフルスクリーンを維持（フルスクリーン解除コマンドを削除）
-            // Console.WriteLine($"[MpvController] Exiting fullscreen for display {displayIndex}...");
-            // SendCommand(displayIndex, "set_property", "fullscreen", false);
-        }
-
-        // 再生状態を更新
-        instance.IsPlaying = willPlay;
-
-        return true;
-    }
-
-    /// <summary>
     /// 全インスタンスに対する統一的な再生/一時停止トグル
     /// グローバルフラグに基づいて、全インスタンスを同じ状態に制御
     /// インスタンス間の遅延を最小化するため、迅速にコマンド送信
     /// </summary>
-    public void TogglePlayPauseAll()
+    public void TogglePlayPause()
     {
-        Console.WriteLine("[MpvController] ========== TogglePlayPauseAll (Global) ==========");
+        Console.WriteLine("[MpvController] ========== TogglePlayPause (Global) ==========");
 
         var allInstances = _instances.Values.ToList();
 
@@ -405,6 +331,33 @@ public class MpvController : IDisposable
 
             _isGloballyPlaying = true;
             Console.WriteLine("[MpvController] All instances playing.");
+        }
+        // 混在状態（一部クラッシュ等）→ グローバルフラグで統一制御
+        else
+        {
+            Console.WriteLine($"[MpvController] Mixed state detected. Applying global flag: {(_isGloballyPlaying ? "pause" : "play")} all...");
+
+            bool targetPause = _isGloballyPlaying;
+            var runningInstances = allInstances.Where(i => i.IsRunning).ToList();
+
+            var mixedTasks = runningInstances.Select(instance =>
+                Task.Run(() =>
+                {
+                    SendCommand(instance.DisplayIndex, "set_property", "pause", targetPause);
+                    if (!targetPause)
+                        SendCommand(instance.DisplayIndex, "set_property", "fullscreen", true);
+                })
+            ).ToArray();
+
+            Task.WaitAll(mixedTasks);
+
+            foreach (var instance in runningInstances)
+            {
+                instance.IsPlaying = !targetPause;
+            }
+
+            _isGloballyPlaying = !targetPause;
+            Console.WriteLine($"[MpvController] Mixed state resolved: all instances {(_isGloballyPlaying ? "playing" : "paused")}.");
         }
 
         Console.WriteLine("[MpvController] ================================================\n");
@@ -533,7 +486,7 @@ public class MpvController : IDisposable
     /// </summary>
     public bool SetPlaybackSpeed(int displayIndex, double speed)
     {
-        return SendCommand(displayIndex, "set", "speed", speed);
+        return SendCommand(displayIndex, "set_property", "speed", speed);
     }
 
     /// <summary>
